@@ -3,8 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-#ifndef SYSTEM_HPP
-#define SYSTEM_HPP
+#pragma once
 
 #include <iostream>
 #include <cstdlib>

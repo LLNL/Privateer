@@ -4,6 +4,9 @@
 // SPDX-License-Identifier: MIT
 
 // Refer to: https://www.fluentcpp.com/2019/05/24/how-to-fill-a-cpp-collection-with-random-values/
+
+#pragma once
+
 #include <algorithm>
 #include <iostream>
 #include <random>

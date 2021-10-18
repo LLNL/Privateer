@@ -5,6 +5,8 @@
 
 //https://stackoverflow.com/questions/17021214/how-to-decode-proc-pid-pagemap-entries-in-linux/45126141#45126141
 
+#pragma once
+
 #include <fcntl.h>  /* open */
 #include <stdint.h> /* uint64_t  */
 #include <stdlib.h> /* size_t */

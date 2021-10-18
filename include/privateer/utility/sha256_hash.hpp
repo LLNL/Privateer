@@ -3,8 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-#ifndef SHA256_HASH_HPP
-#define SHA256_HASH_HPP
+#pragma once
 
 #include <openssl/sha.h>
 #include <sstream>
