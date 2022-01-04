@@ -18,11 +18,11 @@ endif()
 
 FIND_PACKAGE(OpenSSL)
 
-option(USE_PAGEMAP_MSYNC ON)
+# option(USE_PAGEMAP_MSYNC ON)
 
-if (USE_PAGEMAP_MSYNC)
-  add_definitions(-DUSE_PAGEMAP)
-endif()
+# if (USE_PAGEMAP_MSYNC)
+#  add_definitions(-DUSE_PAGEMAP)
+# endif()
 
 # if (CRYPTOPP_ROOT)
 #  include_directories(${CRYPTOPP_ROOT})

@@ -37,16 +37,17 @@ int main(int argc, char** argv) {
   // multi_mmap_private mapper(std::string(fname), size_bytes);
   // size_t* the_ints = (size_t*)mapper.data();
   Privateer *priv;
+  std::string stash_path = std::string(fname) + "_stash";
   if(no_init == 0){
     std::string blocks_dir_path = std::string(fname) + "_blocks";
-    priv = new Privateer(nullptr, blocks_dir_path.c_str(), fname, size_bytes, size_bytes);
+    priv = new Privateer(nullptr, blocks_dir_path.c_str(), fname, stash_path.c_str(), size_bytes);
   }
   else{
     std::string new_version_metadata_path = std::string(fname) + "_2";
-    priv = new Privateer(fname, new_version_metadata_path.c_str());
+    priv = new Privateer(fname, new_version_metadata_path.c_str(), stash_path.c_str());
   }
   size_t* the_ints = (size_t*)priv->data();
-  size_t current_size = priv->current_size();
+  size_t current_size = size_bytes; // priv->current_size();
   size_t num_ints = size_bytes / sizeof(size_t); // Is this correct or should we add "get_size()" to privateer and use it here?
 
   std::cout << "Current size = " << current_size << std::endl;

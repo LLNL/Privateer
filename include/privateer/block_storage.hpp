@@ -17,32 +17,45 @@
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
+#include "boost/lexical_cast.hpp"
 
 #include "utility/sha256_hash.hpp"
 #include "utility/file_util.hpp"
 #include "utility/system.hpp"
 
-class BlockStorage
+class block_storage
 {
   public:
-    BlockStorage(std::string base_directory);
-    BlockStorage(std::string base_directory, size_t block_granularity);
-    BlockStorage(const BlockStorage &block_storage);
-    ~BlockStorage();
+    block_storage(std::string base_directory); // Open
+    block_storage(std::string base_directory, std::string stash_directory); // Open with Stash
+    block_storage(std::string base_directory, size_t block_granularity); // Create
+    block_storage(std::string base_directory, std::string stash_directory, size_t block_granularity); // Create with Stash
+
+    block_storage(const block_storage &block_storage);
+    ~block_storage();
 
     int create_temporary_unique_block(char* name_template, uint64_t file_index);
     int create_temporary_unique_block(char* name_template, const char* original_path, uint64_t file_index);
     bool store_block(int fd, void* buffer, bool write_file, uint64_t file_index);
+    bool stash_block(void* block_start, uint64_t block_index);
+    std::string commit_stash_block(void* block_start, uint64_t block_index);
     int get_block_fd(const char* hash, uint64_t file_index);
     char* get_block_hash(int fd);
     size_t get_block_granularity();
     std::string get_blocks_subdirectory(uint64_t file_index);
+    std::string get_block_stash_path(size_t block_index);
+    std::string get_blocks_path();
 
   private:
+    void create(std::string base_directory, std::string stash_directory, size_t block_granularity);
+    void open(std::string base_directory, std::string stash_directory);
     std::string base_directory;
+    std::string stash_directory;
     size_t block_granularity;
     std::map<int, std::string> block_fd_hash;
     std::map<int, std::string> block_fd_temp_name;
+    std::map<uint64_t, std::string> stash_block_ids;
     bool block_exists(const char* hash);
     // std::mutex * store_block_mutex;
     // bip::named_mutex *store_block_mutex; // (bip::open_or_create, "store_block_mutex");
@@ -51,69 +64,25 @@ class BlockStorage
     // std::atomic<size_t> num_files = 0;
 };
 
-BlockStorage::BlockStorage(std::string base_directory_path){
-  if(!utility::directory_exists(base_directory_path.c_str())){
-    std::cerr << "BlockStorage: Error - Blocks directory does not exist" << std::endl;
-    exit(-1);
-  }
-  // std::cout << "BlockStorage: Base directory path arg = " << base_directory_path << std::endl;
-  base_directory = base_directory_path;
-  // std::cout << "BlockStorage: Base directory path = " << base_directory << std::endl;
-
-  std::string granularity_string;
-  std::string granularity_file_name = base_directory + "/_granularity";
-  std::ifstream granularity_file;
-  granularity_file.open(granularity_file_name);
-  if (!granularity_file.is_open()){
-    std::cerr << "BlockStorage: Error opening block granularity metadata"<< std::endl;
-    exit(-1);
-  }
-  if (!std::getline(granularity_file, granularity_string)){
-    std::cerr << "BlockStorage: Error reading block granularity metadata"<< std::endl;
-    exit(-1);
-  }
-  block_granularity = std::stol(granularity_string);
-  // store_block_mutex =  new std::mutex(); // bip::named_mutex(bip::open_or_create, "store_block_mutex");
-  // std::cout << "BlockStorage: Base directory path = " << base_directory << std::endl;
+block_storage::block_storage(std::string base_directory_path){
+  open(base_directory_path,"");
 }
 
-BlockStorage::BlockStorage(std::string base_directory_path, const size_t block_granularity_arg){
-  // std::cout << "BlockStorage: Base directory path arg = " << base_directory_path << std::endl;
-  base_directory = base_directory_path;
-  // std::cout << "BlockStorage: Base directory path = " << base_directory << std::endl;
+block_storage::block_storage(std::string base_directory_path, std::string stash_directory){
+  open(base_directory_path,stash_directory);
+}
 
-  block_granularity = block_granularity_arg;
+block_storage::block_storage(std::string base_directory_path, const size_t block_granularity_arg){
+  create(base_directory_path, "", block_granularity_arg);
+}
 
-  //  if (!utility::directory_exists(base_directory_path.c_str())){
-    // Grab mutex
-    // std::lock_guard<std::mutex> create_blocks_dir_lock(create_block_directory_mutex);
-    if (!utility::directory_exists(base_directory_path.c_str())){
-      // create blocks directory and save block_granularity in _metadata
-      if (!utility::create_directory(base_directory.c_str())){
-        std::cerr << "Error: Failed to create blocks directory" << std::endl;
-        exit(-1);
-      }
-      std::string granularity_file_name = base_directory + "/_granularity";
-      std::ofstream granularity_file;
-      granularity_file.open(granularity_file_name);
-      granularity_file << block_granularity;
-      granularity_file.close();
-    }
-    else{
-      std::cerr << "BlockStorage: Error - Blocks directory already exists" << std::endl;
-      exit(-1);
-    }
-  // }
-  /* else{
-    std::cerr << "BlockStorage: Error -  Blocks directory already exists" << std::endl;
-    exit(-1);
-  } */
-  // store_block_mutex =  new std::mutex(); // bip::named_mutex(bip::open_or_create, "store_block_mutex");
+block_storage::block_storage(std::string base_directory_path, std::string stash_directory_path, const size_t block_granularity_arg){
+  create(base_directory_path, stash_directory, block_granularity_arg);
 }
 
 // Copy Constructor
-BlockStorage::BlockStorage(const BlockStorage &block_storage){
-  // std::cout << "BlockStorage: Calling Copy Constructor" << std::endl;
+block_storage::block_storage(const block_storage &block_storage){
+  // std::cout << "block_storage: Calling Copy Constructor" << std::endl;
   base_directory = block_storage.base_directory;
   block_granularity = block_storage.block_granularity;
   block_fd_hash = block_storage.block_fd_hash;
@@ -123,26 +92,104 @@ BlockStorage::BlockStorage(const BlockStorage &block_storage){
   create_block_directory_mutex = block_storage.create_block_directory_mutex; */
 }
 
-
-
-BlockStorage::~BlockStorage(){
+block_storage::~block_storage(){
   // bip::named_mutex::remove("store_block_mutex");
   // delete store_block_mutex;
 }
 
-int BlockStorage::create_temporary_unique_block(char* name_template, uint64_t file_index){
+void block_storage::create(std::string base_directory_path, std::string stash_directory_path, size_t block_granularity_arg){
+  if (!stash_directory.empty()){
+    // Create stash directory
+    if (utility::directory_exists(stash_directory_path.c_str())){
+      std::cerr << "Error: Stash directory already exists" << std::endl;
+      exit(-1);
+    }
+    if (!utility::create_directory(stash_directory_path.c_str())){
+      std::cerr << "Error: Failed to create stash directory" << std::endl;
+      exit(-1);
+    }
+  }
+  // std::cout << "block_storage: Base directory path arg = " << base_directory_path << std::endl;
+  base_directory = base_directory_path;
+  // std::cout << "block_storage: Base directory path = " << base_directory << std::endl;
+
+  stash_directory = stash_directory_path;
+
+  block_granularity = block_granularity_arg;
+
+  //  if (!utility::directory_exists(base_directory_path.c_str())){
+  // Grab mutex
+  // std::lock_guard<std::mutex> create_blocks_dir_lock(create_block_directory_mutex);
+  if (!utility::directory_exists(base_directory_path.c_str())){
+    // create blocks directory and save block_granularity in _metadata
+    if (!utility::create_directory(base_directory.c_str())){
+      std::cerr << "Error: Failed to create blocks directory" << std::endl;
+      exit(-1);
+    }
+    std::string granularity_file_name = base_directory + "/_granularity";
+    std::ofstream granularity_file;
+    granularity_file.open(granularity_file_name);
+    granularity_file << block_granularity;
+    granularity_file.close();
+  }
+  else{
+    std::cerr << "block_storage: Error - Blocks directory already exists" << std::endl;
+    exit(-1);
+  }
+}
+
+void block_storage::open(std::string base_directory_path, std::string stash_directory_path){
+  if (!stash_directory.empty()){
+    // Create stash directory
+    if (utility::directory_exists(stash_directory_path.c_str())){
+      std::cerr << "Error: Stash directory already exists" << std::endl;
+      exit(-1);
+    }
+    if (!utility::create_directory(stash_directory_path.c_str())){
+      std::cerr << "Error: Failed to create stash directory" << std::endl;
+      exit(-1);
+    }
+  }
+  if(!utility::directory_exists(base_directory_path.c_str())){
+    std::cerr << "block_storage: Error - Blocks directory does not exist" << std::endl;
+    exit(-1);
+  }
+  // std::cout << "block_storage: Base directory path arg = " << base_directory_path << std::endl;
+  base_directory = base_directory_path;
+  // std::cout << "block_storage: Base directory path = " << base_directory << std::endl;
+
+  stash_directory = stash_directory_path;
+
+  std::string granularity_string;
+  std::string granularity_file_name = base_directory + "/_granularity";
+  std::ifstream granularity_file;
+  granularity_file.open(granularity_file_name);
+  if (!granularity_file.is_open()){
+    std::cerr << "block_storage: Error opening block granularity metadata"<< std::endl;
+    exit(-1);
+  }
+  if (!std::getline(granularity_file, granularity_string)){
+    std::cerr << "block_storage: Error reading block granularity metadata"<< std::endl;
+    exit(-1);
+  }
+  block_granularity = std::stol(granularity_string);
+  // store_block_mutex =  new std::mutex(); // bip::named_mutex(bip::open_or_create, "store_block_mutex");
+  // std::cout << "block_storage: Base directory path = " << base_directory << std::endl;
+}
+
+int block_storage::create_temporary_unique_block(char* name_template, uint64_t file_index){
   // std::lock_guard<std::mutex> store_lock(store_block_mutex);
   std::string subdirectory_name = get_blocks_subdirectory(file_index);
   std::string temporary_file_name = subdirectory_name + "/" + std::string(name_template);
   char* temporary_file_name_template = new char[temporary_file_name.length() + 1];
   temporary_file_name_template = (char*) memcpy((void*) temporary_file_name_template, (void*) temporary_file_name.c_str(), temporary_file_name.length() + 1);
-  // std::cout << "BlockStorage: temporary_file_name_template =" << temporary_file_name_template << std::endl;
+  // std::cout << "block_storage: temporary_file_name_template =" << temporary_file_name_template << std::endl;
   int fd = mkstemp(temporary_file_name_template);
   if (fd == -1){
-    std::cerr << "BlockStorage: Error creating temporary file" << strerror(errno) << std::endl;
+    std::cerr << "block_storage: Error creating temporary file" << strerror(errno) << std::endl;
     return fd;
   }
-  // std::cout << "BlockStorage: block_granularity = " << block_granularity << std::endl;
+  // std::cout << "block_storage: block_granularity = " << block_granularity << std::endl;
   int trunc_status = ftruncate(fd, block_granularity);
   if (trunc_status == -1){
     std::cerr << "Block Storage: Error sizing file" << std::endl;
@@ -159,20 +206,20 @@ int BlockStorage::create_temporary_unique_block(char* name_template, uint64_t fi
 }
 
 
-int BlockStorage::create_temporary_unique_block(char* name_template, const char* original_path, uint64_t file_index){
+int block_storage::create_temporary_unique_block(char* name_template, const char* original_path, uint64_t file_index){
   std::string subdirectory_name = get_blocks_subdirectory(file_index);
   std::string temporary_file_name = subdirectory_name + "/" + std::string(name_template);
   char* temporary_file_name_template = new char[temporary_file_name.length() + 1];
   temporary_file_name_template = (char*) memcpy((void*) temporary_file_name_template, (void*) temporary_file_name.c_str(), temporary_file_name.length() + 1);
-  // std::cout << "BlockStorage: temporary_file_name_template =" << temporary_file_name_template << std::endl;
-  // std::cout << "BlockStorage: Original path = " << original_path << std::endl;
+  // std::cout << "block_storage: temporary_file_name_template =" << temporary_file_name_template << std::endl;
+  // std::cout << "block_storage: Original path = " << original_path << std::endl;
   int fd = mkstemp(temporary_file_name_template);
-  // std::cout << "BlockStorage: temporary_file_name_template =" << temporary_file_name_template << std::endl;
+  // std::cout << "block_storage: temporary_file_name_template =" << temporary_file_name_template << std::endl;
   if (fd == -1){
-    std::cerr << "BlockStorage: Error creating temporary file" << strerror(errno) << std::endl;
+    std::cerr << "block_storage: Error creating temporary file" << strerror(errno) << std::endl;
     return fd;
   }
-  // std::cout << "BlockStorage: block_granularity = " << block_granularity << std::endl;
+  // std::cout << "block_storage: block_granularity = " << block_granularity << std::endl;
   int trunc_status = ftruncate(fd, block_granularity);
   if (trunc_status == -1){
     std::cerr << "Block Storage: Error sizing file" << std::endl;
@@ -192,9 +239,9 @@ int BlockStorage::create_temporary_unique_block(char* name_template, const char*
   return fd;
 }
 
-bool BlockStorage::store_block(int fd, void* buffer, bool write_to_file, uint64_t file_index){
+bool block_storage::store_block(int fd, void* buffer, bool write_to_file, uint64_t file_index){
   if (block_fd_temp_name.find(fd) == block_fd_temp_name.end()){
-    std::cerr << "BlockStorage: Error - No open file descriptor for this block" << std::endl;
+    std::cerr << "block_storage: Error - No open file descriptor for this block" << std::endl;
     std::cerr << "fd = " << fd << std::endl;
     return false;
   }
@@ -208,8 +255,8 @@ bool BlockStorage::store_block(int fd, void* buffer, bool write_to_file, uint64_
     block_fd_hash[fd] = std::string(block_hash);
   }
 
-  // std::cout << "BlockStorage: store_block() base_directory = " << base_directory << std::endl;
-  // std::cout << "BlockStorage: store_block() std::string(base_directory) returns  " << std::string(base_directory) << std::endl;
+  // std::cout << "block_storage: store_block() base_directory = " << base_directory << std::endl;
+  // std::cout << "block_storage: store_block() std::string(base_directory) returns  " << std::string(base_directory) << std::endl;
 
   std::string final_filename = subdirectory_name + "/" + block_hash;
   std::string temporary_filename = block_fd_temp_name[fd];
@@ -223,7 +270,7 @@ bool BlockStorage::store_block(int fd, void* buffer, bool write_to_file, uint64_
       if (write_to_file){
         size_t written = pwrite(fd ,buffer, block_granularity, 0);
         if (written == -1){
-          std::cerr << "BlockStorage: Error writing to file" << std::endl;
+          std::cerr << "block_storage: Error writing to file" << std::endl;
           // store_block_mutex->unlock();
           return false;
         }
@@ -236,13 +283,13 @@ bool BlockStorage::store_block(int fd, void* buffer, bool write_to_file, uint64_
         if (utility::file_exists(final_filename.c_str())){
           int remove_status = remove(temporary_filename.c_str());
           if (remove_status != 0){
-            std::cerr << "BlockStorage: Error removing temporary file" << std::endl;
+            std::cerr << "block_storage: Error removing temporary file" << std::endl;
             return false;
           }
           return true;
         }
         else{
-          std::cerr << "BlockStorage: Error renaming file " << strerror(errno) << std::endl;
+          std::cerr << "block_storage: Error renaming file " << strerror(errno) << std::endl;
           std::cerr << "Temporary file name = " << temporary_filename << std::endl;
         }
         return false;
@@ -251,7 +298,7 @@ bool BlockStorage::store_block(int fd, void* buffer, bool write_to_file, uint64_
     else{
       int remove_status = remove(temporary_filename.c_str());
       if (remove_status != 0){
-        std::cerr << "BlockStorage: Error removing temporary file" << std::endl;
+        std::cerr << "block_storage: Error removing temporary file" << std::endl;
         return false;
       }
     }
@@ -259,21 +306,79 @@ bool BlockStorage::store_block(int fd, void* buffer, bool write_to_file, uint64_
   /* else{
     int remove_status = remove(temporary_filename.c_str());
     if (remove_status != 0){
-      std::cerr << "BlockStorage: Error removing temporary file" << std::endl;
+      std::cerr << "block_storage: Error removing temporary file" << std::endl;
       return false;
     }
   } */
   return true;
 }
 
-int BlockStorage::get_block_fd(const char* hash, uint64_t file_index){
+bool block_storage::stash_block(void* block_start, uint64_t block_index){
+  boost::uuids::uuid uuid = boost::uuids::random_generator()();
+  const std::string block_UUID = boost::lexical_cast<std::string>(uuid);
+  std::string block_temp_path = stash_directory + "/" + block_UUID;
+  int block_fd = ::open(block_temp_path.c_str(), O_CREAT, O_RDWR);
+  if (block_fd == -1){
+    std::cerr << "block_storage: Error opening stash file descriptor - " << strerror(errno) << std::endl;
+    return false;
+  }
+  if (pwrite(block_fd, block_start, block_granularity, 0) == -1){
+    std::cerr << "block_storage: Error writing block to stash file - " << strerror(errno) << std::endl;
+    return false;
+  }
+  // Add to/update stash lookup
+  stash_block_ids[block_index] = block_UUID;
+}
+
+// [In-Progress]
+std::string block_storage::commit_stash_block(void* block_start, uint64_t block_index){
+  // Compute block hash
+  std::string subdirectory_name = get_blocks_subdirectory(block_index);
+  std::string block_hash = utility::compute_hash((char*) block_start, block_granularity);
+
+  // Rename block
+  std::string final_filename = subdirectory_name + "/" + block_hash;
+  std::string stash_filename = stash_directory + "/" + stash_block_ids[block_index];
+
+  if (!utility::file_exists(final_filename.c_str())){
+    
+    // Rename
+    int rename_status = rename(stash_filename.c_str(),final_filename.c_str());
+    if (rename_status != 0){
+      if (utility::file_exists(final_filename.c_str())){
+        int remove_status = remove(stash_filename.c_str());
+        if (remove_status != 0){
+          std::cerr << "block_storage: Error removing stash file" << std::endl;
+          return "";
+        }
+        return block_hash;
+      }
+      else{
+        std::cerr << "block_storage: Error renaming file " << strerror(errno) << std::endl;
+        std::cerr << "Stash file name = " << stash_filename << std::endl;
+      }
+      return "";
+    }
+  }
+  else{
+    int remove_status = remove(stash_filename.c_str());
+    if (remove_status != 0){
+      std::cerr << "block_storage: Error removing stash file" << std::endl;
+      return "";
+    }
+    return block_hash;
+  }
+
+}
+
+int block_storage::get_block_fd(const char* hash, uint64_t file_index){
   std::string subdirectory_name = get_blocks_subdirectory(file_index);
   std::string filename = subdirectory_name + "/" + std::string(hash);
   int block_fd = ::open(filename.c_str(), O_RDONLY, (mode_t) 0666);
   return block_fd;
 }
 
-char* BlockStorage::get_block_hash(int fd){
+char* block_storage::get_block_hash(int fd){
   if (block_fd_hash.find(fd) == block_fd_hash.end()){
     std::string empty_string = "";
     return (char*) empty_string.c_str();
@@ -283,11 +388,11 @@ char* BlockStorage::get_block_hash(int fd){
   }
 }
 
-size_t BlockStorage::get_block_granularity(){
+size_t block_storage::get_block_granularity(){
   return block_granularity;
 }
 
-std::string BlockStorage::get_blocks_subdirectory(uint64_t file_index){
+std::string block_storage::get_blocks_subdirectory(uint64_t file_index){
   size_t subdir_index = file_index % files_per_subdirectory;
   std::string subdir_name = base_directory + "/" + std::to_string(subdir_index);
   if (!utility::directory_exists(subdir_name.c_str())){
@@ -298,4 +403,16 @@ std::string BlockStorage::get_blocks_subdirectory(uint64_t file_index){
   }
 
   return subdir_name;
+}
+
+std::string block_storage::get_block_stash_path(size_t block_index){
+  std::string block_stash_path = "";
+  if (stash_block_ids.find(block_index) != stash_block_ids.end()){
+    block_stash_path = stash_directory + "/" + stash_block_ids[block_index];
+  }
+  return block_stash_path;
+}
+
+std::string block_storage::get_blocks_path(){
+  return base_directory;
 }
