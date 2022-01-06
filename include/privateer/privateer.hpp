@@ -204,7 +204,7 @@ inline void Privateer::create(void *addr, const char *blocks_path, const char *v
   if ( std::isnan(file_granularity) || file_granularity == 0){
     file_granularity = FILE_GRANULARITY_DEFAULT_BYTES;
   }
-
+  std::cout << "block size: " << file_granularity << std::endl;
   // Handling if requested size is less than file granularity
   file_granularity = std::min(max_capacity, file_granularity);
 
@@ -246,6 +246,14 @@ inline void Privateer::open(void* addr, const char *version_metadata_path, bool 
 
   size_t available_memory = utility::get_available_memory(); // TODO: Change the way we get available memory
   vmm = new virtual_memory_manager(addr, version_metadata_path, stash_dir_path, read_only, available_memory);
+
+  utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
+  struct sigaction sa;
+  sa.sa_flags = SA_SIGINFO;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_sigaction = utility::sigsegv_handler_dispatcher::handler;
+  if (sigaction(SIGSEGV, &sa, NULL) == -1)
+    std::cerr << "Error: sigaction failed" << std::endl;
 }
 
 // TODO: Change this and support it in VMM
@@ -269,11 +277,11 @@ inline void Privateer::open(void *addr, const char *version_metadata_path, const
   }
   // Copy all metadata files
   std::string metadata_file = std::string(version_metadata_path) + "/_metadata";
-  std::string size_file = std::string(version_metadata_path) + "/_size";
+  std::string size_file = std::string(version_metadata_path) + "/_capacity";
   std::string blocks_path_file = std::string(version_metadata_path) + "/_blocks_path";
 
   std::string new_metadata_file = std::string(new_version_metadata_path) + "/_metadata";
-  std::string new_size_file = std::string(new_version_metadata_path) + "/_size";
+  std::string new_size_file = std::string(new_version_metadata_path) + "/_capacity";
   std::string new_blocks_path_file = std::string(new_version_metadata_path) + "/_blocks_path";
 
   if (!utility::copy_file(metadata_file.c_str(),new_metadata_file.c_str(), false)){
@@ -281,7 +289,7 @@ inline void Privateer::open(void *addr, const char *version_metadata_path, const
     exit(-1);
   }
   if (!utility::copy_file(size_file.c_str(), new_size_file.c_str(), false)){
-    std::cerr << "Privateer: Error Copying size file" << std::endl;
+    std::cerr << "Privateer: Error Copying capacity file" << std::endl;
     exit(-1);
   }
   if (!utility::copy_file(blocks_path_file.c_str(), new_blocks_path_file.c_str(), false)){

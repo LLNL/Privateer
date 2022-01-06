@@ -199,12 +199,12 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     std::string backing_block_path = "";
     std::string stash_backing_block_path = m_block_storage->get_block_stash_path(block_index); 
     std::string blocks_path = m_block_storage->get_blocks_path();
-    std::cout << "block_index = " << block_index << std::endl;
+    // std::cout << "block_index = " << block_index << std::endl;
     if (!stash_backing_block_path.empty()){
       backing_block_path = stash_backing_block_path;
     }
     else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){
-      backing_block_path = blocks_path + "/" + blocks_ids[block_index];
+      backing_block_path = m_block_storage->get_blocks_subdirectory(block_index) + "/" + blocks_ids[block_index];
     }
     
     // shm_open
@@ -229,11 +229,15 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       // read block content into temporary buffer
       backing_block_fd = open(backing_block_path.c_str(), O_RDONLY);
       if (backing_block_fd == -1){
-        std::cerr << "virtual_memory_manager: Error opening backing block: " << backing_block_path  << " for address: " << block_address << std::endl;
+        std::cerr << "virtual_memory_manager: Error opening backing block: " << backing_block_path  << " for address: " << block_address << " - " << strerror(errno) << std::endl;
         exit(-1);
       }
       if (pread(backing_block_fd, temp_buffer, m_block_size, 0) == -1){
         std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << block_address << std::endl;
+      }
+
+      if (close(backing_block_fd) == -1){
+        std::cout << "virtual_memory_manager: Error closing backing block: " << backing_block_path << " - " << strerror(errno) << std::endl;
       }
     }
     else{ // Zero page
@@ -297,7 +301,7 @@ void virtual_memory_manager::msync(){
   #pragma omp parallel
   for (auto it = dirty_lru.begin(); it != dirty_lru.end(); ++it){
     void* block_address = (void*) *it;
-    uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_region_max_capacity;
+    uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
     std::string temporary_file_name_template = std::to_string(block_index) + "_temp_XXXXXX";
     char* name_template = (char*) temporary_file_name_template.c_str();
     int block_fd = m_block_storage->create_temporary_unique_block(name_template, block_index); // , existing_block_file_name.c_str());

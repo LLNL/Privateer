@@ -35,8 +35,10 @@ int main(int argc, char** argv) {
   // Create mmap
   // multi_mmap_private mapper(std::string(fname), size_bytes);
   // size_t* the_ints = (size_t*)mapper.data();
-  Privateer priv(fname, fname, size_bytes);
-  size_t* the_ints = (size_t*)priv.data();
+  std::string stash_path = std::string(fname) + "_stash";
+  std::string blocks_path = std::string(fname) + "_blocks";
+  Privateer* priv = new Privateer(nullptr, blocks_path.c_str(), fname, stash_path.c_str(), size_bytes);
+  size_t* the_ints = (size_t*)priv->data();
   size_t num_ints = size_bytes / sizeof(size_t); // Is this correct or should we add "get_size()" to privateer and use it here?
 
 
@@ -61,7 +63,7 @@ int main(int argc, char** argv) {
   std::cout << "Initialization done" << std::endl;
   std::cout << "msync..." << std::endl; 
   double init_msync_start = omp_get_wtime();
-  priv.msync();
+  priv->msync();
   double init_msync_end = omp_get_wtime();
   std::cout << "msync done" << std::endl;
   //

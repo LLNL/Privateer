@@ -64,12 +64,12 @@ int main(int argc, char** argv) {
       // the_ints[i] = i / chunk_size;
     }
     double init_end = omp_get_wtime();
-    std::cout << "Initialization done" << std::endl;
+    std::cout << "Initialization took: " << (init_end - init_start) << std::endl;
     std::cout << "msync..." << std::endl; 
     double init_msync_start = omp_get_wtime();
     priv->msync();
     double init_msync_end = omp_get_wtime();
-    std::cout << "msync done" << std::endl;
+    std::cout << "msync took: " << (init_msync_end - init_msync_start) << std::endl;
 
   }
 
