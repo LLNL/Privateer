@@ -24,9 +24,9 @@
 
 class virtual_memory_manager {
   public:
-    virtual_memory_manager(void* start_address, size_t block_size, size_t region_max_capacity, size_t max_mem_size,
+    virtual_memory_manager(void* start_address, size_t block_size, size_t region_max_capacity, size_t max_mem_size_blocks,
                                                     std::string versioin_metadata_path, std::string blocks_path, std::string stash_path);
-    virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only, size_t max_memory);
+    virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only, size_t max_mem_size_blocks);
     ~virtual_memory_manager();
     void msync();
     void handler(int sig, siginfo_t *si, void *ctx_void_ptr);
@@ -41,7 +41,7 @@ class virtual_memory_manager {
     bool m_read_only;
     std::list<uint64_t> clean_lru;
     std::list<uint64_t> dirty_lru;
-    std::list<uint64_t> stash_list;
+    std::set<uint64_t> stash_set;
     std::set<uint64_t> present_blocks;
     std::string *blocks_ids;
     
@@ -59,18 +59,20 @@ const std::string virtual_memory_manager::EMPTY_BLOCK_HASH = "000000000000000000
 
 // TODO IMPORTANT: Make create() and open() interfaces
 // Create
-virtual_memory_manager::virtual_memory_manager(void* start_address, size_t block_size, size_t region_max_capacity, size_t max_mem_size,
+virtual_memory_manager::virtual_memory_manager(void* start_address, size_t block_size, size_t region_max_capacity, size_t max_mem_size_blocks,
                                                     std::string version_metadata_path, std::string blocks_path, std::string stash_path){
   m_block_size = block_size;
   m_region_max_capacity = region_max_capacity;
-  m_max_mem_size = ((size_t)(max_mem_size / m_block_size)) * m_block_size;
+  size_t max_mem_size_bytes = max_mem_size_blocks * m_block_size;
+  m_max_mem_size = ((size_t)(max_mem_size_bytes / m_block_size)) * m_block_size;
+  std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
   m_version_metadata_path = version_metadata_path;
 
 
   m_block_storage = new block_storage(blocks_path, stash_path, block_size);
   
   size_t num_blocks = m_region_max_capacity / m_block_size;
-
+  std::cout << "num_blocks: " << num_blocks << std::endl;
   blocks_ids = new std::string[num_blocks];
 
   // mmap region with full size
@@ -101,7 +103,7 @@ virtual_memory_manager::virtual_memory_manager(void* start_address, size_t block
 };
 
 // Open
-virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only, size_t max_memory){
+virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only, size_t max_mem_size_blocks){
   m_version_metadata_path = version_metadata_path;
   // Read blocks path
   std::string blocks_path_file_name = std::string(m_version_metadata_path) + "/_blocks_path";
@@ -140,7 +142,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     std::cerr << "Privateer373: mmap error - " << strerror(errno)<< std::endl;
     exit(-1);
   }
-
+  std::cout << "num_blocks: " << num_blocks << std::endl;
   blocks_ids = new std::string[num_blocks];
   char* metadata_content = new char[metadata_size];
   size_t read = ::pread(metadata_fd, (void*) metadata_content, metadata_size, 0);
@@ -159,7 +161,10 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   }
   delete [] metadata_content;
 
-  m_max_mem_size = max_memory;
+  size_t max_mem_size_bytes = max_mem_size_blocks * m_block_size;
+  m_max_mem_size = ((size_t)(max_mem_size_bytes / m_block_size)) * m_block_size;
+
+  std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
   
 }
 
@@ -218,6 +223,11 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     if (trunc_status == -1){
       std::cerr << "Error ftruncate: " << strerror(errno) << std::endl;
     }
+    // shm_unlink
+    if (shm_unlink(block_name.c_str()) == -1){
+      std::cerr << "virtual_memory_manager: Error shm_unlink: " << strerror(errno) << std::endl;
+      exit(-1);
+    }
     // mmap temporary location
     void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (temp_buffer == MAP_FAILED){
@@ -251,13 +261,18 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       std::cerr << "virtual_memory_manager: Error remapping address: " << block_address << std::endl;
       exit(-1);
     }
-
     // unmap temp buffer
     int munmap_status = munmap(temp_buffer, m_block_size);
     if (munmap_status == -1){
       std::cerr << "virtual_memory_manager: Error unmapping temp buffer: " << (uint64_t) temp_buffer << " for faulting block address: " << block_address << std::endl;
       exit(-1);
     }
+    // close shm_fd
+    if (close(shm_fd) == -1){
+      std::cerr << "virtual_memory_manager: Error closing shm_fd: " << strerror(errno) << std::endl;
+      exit(-1);
+    }
+
     // Update LRUs
     if (is_write_fault){
       dirty_lru.push_front(block_address);
@@ -271,7 +286,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
 
 void virtual_memory_manager::evict_if_needed(){
   void* to_evict;
-  if (present_blocks.size() >= m_max_mem_size){
+  if ((present_blocks.size()*m_block_size) >= m_max_mem_size){
     if (clean_lru.size() > 0){
         to_evict = (void*) clean_lru.back();
         clean_lru.pop_back();
@@ -284,7 +299,7 @@ void virtual_memory_manager::evict_if_needed(){
         std::cerr << "Virtual memory manager: Error stashing block with index: " << block_index << std::endl;
         exit(-1);
       }
-      stash_list.push_back((uint64_t) to_evict);
+      stash_set.insert((uint64_t) to_evict);
     }
     int protect_status = mprotect(to_evict, m_block_size, PROT_NONE);
     if (protect_status == -1){
@@ -315,6 +330,7 @@ void virtual_memory_manager::msync(){
       std::cerr << "virtual_memory_manager: Error storing block with index " << block_index << std::endl;
       exit(-1);
     }
+    std::cout << "block_index present dirty: " << block_index << std::endl;
     blocks_ids[block_index] = std::string(m_block_storage->get_block_hash(block_fd));
     // Change mprotect to read_only
     int mprotect_stat = mprotect((void*) block_address, m_block_size, PROT_READ);
@@ -323,20 +339,26 @@ void virtual_memory_manager::msync(){
       exit(-1);
     }
   }
-  dirty_lru.clear();
-
+  // dirty_lru.clear();
+  std::cout << "msync - Done dirty LRU" << std::endl;
   // 2) Commit stashed blocks
   #pragma omp parallel
-  for (auto it = stash_list.begin(); it != stash_list.end(); ++it){
+  for (auto it = stash_set.begin(); it != stash_set.end(); ++it){
     void* block_address = (void*) *it;
-    uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_region_max_capacity;
+    uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
+    std::cout << "BLOCK_ADDRESS STASH MSYNC: " << (uint64_t) block_address << std::endl;
+    std::cout << "BLOCK_INDEX STASH MSYNC: " << block_index << std::endl;
     std::string block_hash = m_block_storage->commit_stash_block(block_address, block_index);
     if (block_hash.empty()){
-      std::cerr << "virtual_memory_manager: Error committing stash block with address: " << block_address << std::endl;
+      std::cerr << "virtual_memory_manager: Error committing stash block with address: " << (uint64_t) block_address << std::endl;
       exit(-1);
     }
     blocks_ids[block_index] = block_hash;
+    std::cout << "added hash to blocks_ids" << std::endl;
   }
+  stash_set.clear();
+  std::cout << "msync - Done stash" << std::endl;
+
 
   update_metadata();
 }

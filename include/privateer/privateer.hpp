@@ -86,18 +86,21 @@ private:
   std::string* blocks;
   void **regions;
   static size_t const FILE_GRANULARITY_DEFAULT_BYTES;
+  static size_t const MAX_MEM_DEFAULT_BLOCKS;
   static size_t const HASH_SIZE;
   std::string EMPTY_BLOCK_HASH;
   std::string blocks_dir_path;
   std::string version_metadata_dir_path;
   int metadata_fd;
   size_t file_granularity;
+  size_t max_mem_size_blocks;
   std::map<std::string,int> block_file_exist_map;
   bool m_read_only;
   virtual_memory_manager* vmm;
 };
 
 size_t const Privateer::FILE_GRANULARITY_DEFAULT_BYTES = 2*134217728; // 128 MBs 
+size_t const Privateer::MAX_MEM_DEFAULT_BLOCKS = 1024;
 size_t const Privateer::HASH_SIZE = 64; // size of SHA-256 hash
 
 // Create interface
@@ -204,6 +207,10 @@ inline void Privateer::create(void *addr, const char *blocks_path, const char *v
   if ( std::isnan(file_granularity) || file_granularity == 0){
     file_granularity = FILE_GRANULARITY_DEFAULT_BYTES;
   }
+  max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
+  if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
+    max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
+  } 
   std::cout << "block size: " << file_granularity << std::endl;
   // Handling if requested size is less than file granularity
   file_granularity = std::min(max_capacity, file_granularity);
@@ -222,10 +229,10 @@ inline void Privateer::create(void *addr, const char *blocks_path, const char *v
   capacity_file << m_max_size;
   capacity_file.close();
 
-  size_t available_memory = utility::get_available_memory();
-  std::cout << "available_memory= " << available_memory << std::endl;
+  // size_t available_memory = utility::get_available_memory();
+  // std::cout << "available_memory= " << available_memory << std::endl;
 
-  vmm = new virtual_memory_manager(addr, file_granularity, m_max_size, available_memory,
+  vmm = new virtual_memory_manager(addr, file_granularity, m_max_size, max_mem_size_blocks,
                                     version_metadata_dir_path, blocks_dir_path, stash_dir_path);
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
   struct sigaction sa;
@@ -244,8 +251,12 @@ inline void Privateer::open(void* addr, const char *version_metadata_path, bool 
     throw "Directory Does Not Exists";
   }
 
-  size_t available_memory = utility::get_available_memory(); // TODO: Change the way we get available memory
-  vmm = new virtual_memory_manager(addr, version_metadata_path, stash_dir_path, read_only, available_memory);
+  max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
+  if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
+    max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
+  } 
+  // size_t available_memory = utility::get_available_memory(); // TODO: Change the way we get available memory
+  vmm = new virtual_memory_manager(addr, version_metadata_path, stash_dir_path, read_only, max_mem_size_blocks);
 
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
   struct sigaction sa;
