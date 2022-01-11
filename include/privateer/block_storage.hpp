@@ -402,7 +402,6 @@ std::string block_storage::commit_stash_block(uint64_t block_index){
         std::cerr << "Stash file name = " << stash_filename << std::endl;
         return "";
       }
-      return "";
     }
     else{
       stash_block_ids.erase(block_index);
@@ -443,7 +442,7 @@ size_t block_storage::get_block_granularity(){
 }
 
 std::string block_storage::get_blocks_subdirectory(uint64_t file_index){
-  size_t subdir_index = file_index % files_per_subdirectory;
+  size_t subdir_index = file_index / files_per_subdirectory;
   std::string subdir_name = base_directory + "/" + std::to_string(subdir_index);
   if (!utility::directory_exists(subdir_name.c_str())){
     if (!utility::create_directory(subdir_name.c_str())){

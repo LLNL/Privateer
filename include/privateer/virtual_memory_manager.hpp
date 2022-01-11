@@ -171,7 +171,8 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
 void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr){
   
   // Evict if needed
-  evict_if_needed();
+
+  // evict_if_needed();
 
   // Get and assert faulting address
   uint64_t fault_address = (uint64_t) si->si_addr;
@@ -199,6 +200,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     }
   }
   else{
+    evict_if_needed();
     // Read backing block if exists
     int backing_block_fd = -1;
     std::string backing_block_path = "";
@@ -206,9 +208,11 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     std::string blocks_path = m_block_storage->get_blocks_path();
     // std::cout << "block_index = " << block_index << std::endl;
     if (!stash_backing_block_path.empty()){
+      std::cout << "Getting block: " << block_index << " from stash " << stash_backing_block_path << std::endl;
       backing_block_path = stash_backing_block_path;
     }
     else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){
+      std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
       backing_block_path = m_block_storage->get_blocks_subdirectory(block_index) + "/" + blocks_ids[block_index];
     }
     
@@ -289,12 +293,16 @@ void virtual_memory_manager::evict_if_needed(){
   if ((present_blocks.size()*m_block_size) >= m_max_mem_size){
     if (clean_lru.size() > 0){
         to_evict = (void*) clean_lru.back();
+        std::cout << "Evicting clean block: " << ((uint64_t) to_evict - (uint64_t) m_region_start_address) / m_block_size << std::endl;
         clean_lru.pop_back();
     }
     else{
+      // std::cout << "I am failing, bye!" << std::endl;
       to_evict = (void*) dirty_lru.back();
       dirty_lru.pop_back();
+      // std::cout << "Hello from the other side" << std::endl;
       uint64_t block_index = ((uint64_t) to_evict - (uint64_t) m_region_start_address) / m_block_size;
+      std::cout << "stashing block: " << block_index << std::endl;
       if (!m_block_storage->stash_block(to_evict, block_index)){
         std::cerr << "Virtual memory manager: Error stashing block with index: " << block_index << std::endl;
         exit(-1);
@@ -316,32 +324,36 @@ void virtual_memory_manager::msync(){
   #pragma omp parallel
   for (auto it = dirty_lru.begin(); it != dirty_lru.end(); ++it){
     void* block_address = (void*) *it;
-    uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
-    std::string temporary_file_name_template = std::to_string(block_index) + "_temp_XXXXXX";
-    char* name_template = (char*) temporary_file_name_template.c_str();
-    int block_fd = m_block_storage->create_temporary_unique_block(name_template, block_index); // , existing_block_file_name.c_str());
-    if (block_fd == -1){
-      std::cerr << "virtual_memory_manager: Error creating temporary file"<< std::endl;
-      exit(-1);
-    }
-    bool write_block_fd = true;
-    bool status = m_block_storage->store_block(block_fd, block_address, write_block_fd, block_index);
-    if (!status){
-      std::cerr << "virtual_memory_manager: Error storing block with index " << block_index << std::endl;
-      exit(-1);
-    }
-    
-    blocks_ids[block_index] = std::string(m_block_storage->get_block_hash(block_fd));
-    // Change mprotect to read_only
-    int mprotect_stat = mprotect((void*) block_address, m_block_size, PROT_READ);
-    if (mprotect_stat == -1){
-      std::cerr << "virtual_memory_manager: mprotect error for block with address: " << (uint64_t) block_address << " " << strerror(errno) << std::endl;
-      exit(-1);
+    if (stash_set.find((uint64_t) block_address) == stash_set.end()){
+      uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
+      std::string temporary_file_name_template = std::to_string(block_index) + "_temp_XXXXXX";
+      char* name_template = (char*) temporary_file_name_template.c_str();
+      int block_fd = m_block_storage->create_temporary_unique_block(name_template, block_index); // , existing_block_file_name.c_str());
+      if (block_fd == -1){
+        std::cerr << "virtual_memory_manager: Error creating temporary file"<< std::endl;
+        exit(-1);
+      }
+      bool write_block_fd = true;
+      bool status = m_block_storage->store_block(block_fd, block_address, write_block_fd, block_index);
+      if (!status){
+        std::cerr << "virtual_memory_manager: Error storing block with index " << block_index << std::endl;
+        exit(-1);
+      }
+      
+      blocks_ids[block_index] = std::string(m_block_storage->get_block_hash(block_fd));
+      // Change mprotect to read_only
+      int mprotect_stat = mprotect(block_address, m_block_size, PROT_READ);
+      if (mprotect_stat == -1){
+        std::cerr << "virtual_memory_manager: mprotect error for block with address: " << (uint64_t) block_address << " " << strerror(errno) << std::endl;
+        exit(-1);
+      }
+      clean_lru.push_front((uint64_t)block_address);
     }
   }
-  // dirty_lru.clear();
+  dirty_lru.clear();
   
   // 2) Commit stashed blocks
+  std::cout << "SIZE OF STASH SET: " << stash_set.size() << std::endl;
   #pragma omp parallel
   for (auto it = stash_set.begin(); it != stash_set.end(); ++it){
     void* block_address = (void*) *it;
@@ -354,8 +366,6 @@ void virtual_memory_manager::msync(){
     blocks_ids[block_index] = block_hash;
   }
   stash_set.clear();
-
-
   update_metadata();
 }
 
