@@ -330,7 +330,7 @@ void virtual_memory_manager::msync(){
       std::cerr << "virtual_memory_manager: Error storing block with index " << block_index << std::endl;
       exit(-1);
     }
-    std::cout << "block_index present dirty: " << block_index << std::endl;
+    
     blocks_ids[block_index] = std::string(m_block_storage->get_block_hash(block_fd));
     // Change mprotect to read_only
     int mprotect_stat = mprotect((void*) block_address, m_block_size, PROT_READ);
@@ -340,24 +340,20 @@ void virtual_memory_manager::msync(){
     }
   }
   // dirty_lru.clear();
-  std::cout << "msync - Done dirty LRU" << std::endl;
+  
   // 2) Commit stashed blocks
   #pragma omp parallel
   for (auto it = stash_set.begin(); it != stash_set.end(); ++it){
     void* block_address = (void*) *it;
     uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
-    std::cout << "BLOCK_ADDRESS STASH MSYNC: " << (uint64_t) block_address << std::endl;
-    std::cout << "BLOCK_INDEX STASH MSYNC: " << block_index << std::endl;
-    std::string block_hash = m_block_storage->commit_stash_block(block_address, block_index);
+    std::string block_hash = m_block_storage->commit_stash_block(block_index);
     if (block_hash.empty()){
       std::cerr << "virtual_memory_manager: Error committing stash block with address: " << (uint64_t) block_address << std::endl;
       exit(-1);
     }
     blocks_ids[block_index] = block_hash;
-    std::cout << "added hash to blocks_ids" << std::endl;
   }
   stash_set.clear();
-  std::cout << "msync - Done stash" << std::endl;
 
 
   update_metadata();

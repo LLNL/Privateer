@@ -39,7 +39,7 @@ class block_storage
     int create_temporary_unique_block(char* name_template, const char* original_path, uint64_t file_index);
     bool store_block(int fd, void* buffer, bool write_file, uint64_t file_index);
     bool stash_block(void* block_start, uint64_t block_index);
-    std::string commit_stash_block(void* block_start, uint64_t block_index);
+    std::string commit_stash_block(uint64_t block_index);
     int get_block_fd(const char* hash, uint64_t file_index);
     char* get_block_hash(int fd);
     size_t get_block_granularity();
@@ -56,7 +56,6 @@ class block_storage
     std::map<int, std::string> block_fd_hash;
     std::map<int, std::string> block_fd_temp_name;
     std::map<uint64_t, std::string> stash_block_ids;
-    std::map<uint64_t, std::string> stash_block_hashes;
     bool block_exists(const char* hash);
     // std::mutex * store_block_mutex;
     // bip::named_mutex *store_block_mutex; // (bip::open_or_create, "store_block_mutex");
@@ -319,31 +318,33 @@ bool block_storage::store_block(int fd, void* buffer, bool write_to_file, uint64
 }
 
 bool block_storage::stash_block(void* block_start, uint64_t block_index){
-  // compute and cache block hash
-  std::string block_hash = utility::compute_hash((char*) block_start, block_granularity);
-  if (stash_block_hashes.find(block_index) == stash_block_hashes.end()){
-    stash_block_hashes.insert(std::pair<uint64_t,std::string>(block_index, block_hash));
+  // Reusing stash file (mutable)
+  std::string block_UUID = "";
+  std::string block_temp_path = "";
+  bool file_exists = false;
+  int block_fd = -1;
+  if (stash_block_ids.find(block_index) != stash_block_ids.end()){
+    block_UUID = stash_block_ids[block_index];
+    file_exists = true;
   }
   else{
-    // std::cout << "Stashing same again" << std::endl;
-    stash_block_hashes[block_index] = block_hash;
+     boost::uuids::uuid uuid = boost::uuids::random_generator()();
+     block_UUID = boost::lexical_cast<std::string>(uuid);
+     stash_block_ids.insert(std::pair<uint64_t,std::string>(block_index, block_UUID));
   }
-  // std::cout << "stash_block_hashes.size(): " << stash_block_hashes.size() << std::endl;
-  // compute stash UUID
-  boost::uuids::uuid uuid = boost::uuids::random_generator()();
-  const std::string block_UUID = boost::lexical_cast<std::string>(uuid);
-  std::string block_temp_path = stash_directory + "/" + block_UUID;
-  // std::cout << "stash block path: " << block_temp_path << std::endl;
-  int block_fd = ::open(block_temp_path.c_str(), O_CREAT | O_RDWR,  S_IRUSR | S_IWUSR);
+  block_temp_path = stash_directory + "/" + block_UUID;
+  int open_flags = file_exists ? O_RDWR : O_CREAT | O_RDWR;
+  block_fd = ::open(block_temp_path.c_str(), open_flags,  S_IRUSR | S_IWUSR);
   if (block_fd == -1){
     std::cerr << "block_storage: Error opening stash file descriptor - " << strerror(errno) << std::endl;
     return false;
   }
-  // std::cout << "sizing file to: " << block_granularity << std::endl;
-  int trunc_status = ftruncate(block_fd, block_granularity);
-  if (trunc_status == -1){
-    std::cerr << "Block Storage: Error sizing file - " << strerror(errno) << std::endl;
-    return false;
+  if (!file_exists){
+    int trunc_status = ftruncate(block_fd, block_granularity);
+    if (trunc_status == -1){
+      std::cerr << "Block Storage: Error sizing file - " << strerror(errno) << std::endl;
+      return false;
+    }
   }
   if (pwrite(block_fd, block_start, block_granularity, 0) == -1){
     std::cerr << "block_storage: Error writing block to stash file - " << strerror(errno) << std::endl;
@@ -351,39 +352,38 @@ bool block_storage::stash_block(void* block_start, uint64_t block_index){
   }
   if (close(block_fd) == -1){
     std::cerr << "block_storage: Error closing stash file: " << strerror(errno) << std::endl;
-  }
-  // Add to/update stash lookup
-  if (stash_block_ids.find(block_index) == stash_block_ids.end()){
-    stash_block_ids.insert(std::pair<uint64_t,std::string>(block_index, block_UUID));
-  }
-  else{
-    std::string old_UUID = stash_block_ids[block_index];
-    std::string old_stash_block_path = stash_directory + "/" + old_UUID;
-    if (remove(old_stash_block_path.c_str()) == -1){
-      std::cerr << "block_storage: Error removing old stash file " << old_stash_block_path 
-                << " for block with index: " << block_index << " - " << strerror(errno) << std::endl;
-      exit(-1);
-    }
-    stash_block_ids[block_index] = block_UUID;
+    return false;
   }
   return true;
 }
 
 // [In-Progress]
-std::string block_storage::commit_stash_block(void* block_start, uint64_t block_index){
-  // Compute block hash
-  std::string subdirectory_name = get_blocks_subdirectory(block_index);
-  if (stash_block_hashes.find(block_index) == stash_block_hashes.end()){
-    std::cerr << "block_storage: Error - block index " << block_index << " has no associated block hash" << std::endl;
+std::string block_storage::commit_stash_block(uint64_t block_index){
+  if (stash_block_ids.find(block_index) == stash_block_ids.end()){
+    std::cerr << "block_storage: Error - block with index " << block_index << " has no backing stash file" << std::endl;
     exit(-1);
   }
-  std::string block_hash = stash_block_hashes[block_index];// utility::compute_hash((char*) block_start, block_granularity);
-  std::cout << "block_hash STORAGE: " << block_hash << std::endl;
+  std::string block_stash_path = stash_directory + "/" + stash_block_ids[block_index];
+  int block_fd = ::open(block_stash_path.c_str(), O_RDONLY);
+  if (block_fd == -1){
+    std::cerr << "bock_storage: Error opening stash file - " << strerror(errno) << std::endl;
+    exit(-1);
+  }
+  void* temp_buffer = mmap(nullptr, block_granularity, PROT_READ, MAP_PRIVATE, block_fd, 0);
+  if (temp_buffer == MAP_FAILED){
+    std::cerr << "block_storage: Error mmapping temp buffer for stash block - " << strerror(errno) << std::endl;
+    exit(-1);
+  }
+  std::string block_hash = utility::compute_hash((char*) temp_buffer, block_granularity);
+  if (munmap(temp_buffer, block_granularity) == -1){
+    std::cerr << "block_storage: Error unmapping temp buffer for stash block - " << strerror(errno) << std::endl;
+  }
+  // Compute block hash
+  std::string subdirectory_name = get_blocks_subdirectory(block_index);
+  
   // Rename block
   std::string final_filename = subdirectory_name + "/" + block_hash;
   std::string stash_filename = stash_directory + "/" + stash_block_ids[block_index];
-  std::cout << "final_filename: " << final_filename << std::endl;
-  std::cout << "stash_filename: " << stash_filename << std::endl;
   if (!utility::file_exists(final_filename.c_str())){
     // Rename
     int rename_status = rename(stash_filename.c_str(),final_filename.c_str());
@@ -410,7 +410,6 @@ std::string block_storage::commit_stash_block(void* block_start, uint64_t block_
     }
   }
   else{
-    std::cout << "FILE EXISTSSS" << std::endl;
     int remove_status = remove(stash_filename.c_str());
     if (remove_status != 0){
       std::cerr << "block_storage: Error removing stash file" << std::endl;
