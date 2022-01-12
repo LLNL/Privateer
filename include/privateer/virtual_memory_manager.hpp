@@ -32,6 +32,7 @@ class virtual_memory_manager {
     void handler(int sig, siginfo_t *si, void *ctx_void_ptr);
     void* get_region_start_address();
     size_t version_capacity(std::string version_path);
+    bool snapshot(const char* version_metadata_path);
   private:
     void* m_region_start_address;
     size_t m_block_size;
@@ -369,6 +370,57 @@ void virtual_memory_manager::msync(){
   update_metadata();
 }
 
+// TODO: Redesign and Rewrite
+bool virtual_memory_manager::snapshot(const char* version_metadata_path){
+  // Create new version metadata directory
+  if(utility::directory_exists(version_metadata_path)){
+    std::cerr << "Error: Version metadata directory already exists" << std::endl;
+    return false;
+  }
+
+  if (!utility::create_directory(version_metadata_path)){
+    std::cerr << "Error: Failed to create version metadata directory" << std::endl;
+  }
+
+  // temporarily change metadata file descriptor
+  // int temp_metada_fd = metadata_fd;
+  std::string snapshot_metadata_path = std::string(version_metadata_path) + "/_metadata";
+  std::string m_temp_current_metadata_path = m_version_metadata_path;
+  m_version_metadata_path = std::string(version_metadata_path);
+  // std::cout << "Privateer: Snapshotting to " << snapshot_metadata_path << std::endl;
+  // TODO: Add check or create in a different way
+  int metadata_fd = ::open(snapshot_metadata_path.c_str(), O_RDWR | O_CREAT, (mode_t) 0666);
+  int close_status = close(metadata_fd);
+  
+  msync();
+  m_version_metadata_path = m_temp_current_metadata_path;
+  // metadata_fd = temp_metada_fd;
+
+  // Create file to save blocks path
+  std::string blocks_path_file_name = std::string(version_metadata_path) + "/_blocks_path";
+  std::ofstream blocks_path_file;
+  blocks_path_file.open(blocks_path_file_name);
+  blocks_path_file << m_block_storage->get_blocks_path();
+  blocks_path_file.close();
+
+  // Create file to save current size
+  /* std::string size_path_file_name = std::string(version_metadata_path) + "/_size";
+  std::ofstream size_path_file;
+  size_path_file.open(size_path_file_name);
+  size_path_file << m_current_size;
+  size_path_file.close(); */
+
+
+  // Create file to save max. capacity
+  std::string capacity_path_file_name = std::string(version_metadata_path) + "/_capacity";
+  std::ofstream capacity_path_file;
+  capacity_path_file.open(capacity_path_file_name);
+  capacity_path_file << m_region_max_capacity;
+  capacity_path_file.close();
+
+  return true;
+}
+
 void virtual_memory_manager::update_metadata(){
   size_t num_blocks = m_region_max_capacity / m_block_size;
   char* blocks_bytes = new char[num_blocks*HASH_SIZE];
@@ -383,9 +435,11 @@ void virtual_memory_manager::update_metadata(){
   }
 
   std::string metadata_path = m_version_metadata_path + "/_metadata";
+  std::cout << "update metadata to path: " << metadata_path << std::endl;
   int metadata_fd = open(metadata_path.c_str(), O_RDWR);
   if (metadata_fd == -1){
     std::cerr << "virtual_memory_manager: Error opening metadata file " << strerror(errno) << std::endl;
+    exit(-1);
   }
   const auto written = ::pwrite(metadata_fd ,(void*) blocks_bytes, num_blocks*HASH_SIZE, 0);
   if (written == -1){

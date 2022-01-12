@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
   // multi_mmap_private mapper(std::string(fname), size_bytes);
   // size_t* the_ints = (size_t*)mapper.data();
   Privateer *priv;
-  std::string stash_path = std::string(fname) + "_stash";
+  std::string stash_path = std::string(fname) + "_stash_2";
   if(no_init == 0){
     std::string blocks_dir_path = std::string(fname) + "_blocks";
     priv = new Privateer(nullptr, blocks_dir_path.c_str(), fname, stash_path.c_str(), size_bytes);
@@ -103,10 +103,13 @@ int main(int argc, char** argv) {
       std::cout << "i: " << i << " the_ints[i]: " << the_ints[i] << std::endl;
     } */
     if (the_ints[i] != i) {
-      std::cerr << "Failed to Validate" << std::endl;
+      std::cerr << "Failed to Validate " << i << " " << the_ints[i] << std::endl;
       exit(-1);
       // std::cout << "i: " << i << "the_ints[i]: " << the_ints[i] << std::endl;
       // failed = true;
+    }
+    if (i % 1048576 == 0){
+      std::cout << "block: " << (i / 1048576) << " passed" << std::endl;
     }
   }
   // std::cout << "Failed: " << failed << std::endl;

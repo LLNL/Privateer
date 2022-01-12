@@ -199,6 +199,7 @@ int block_storage::create_temporary_unique_block(char* name_template, uint64_t f
     std::cerr << "Block Storage: Error sizing file" << std::endl;
     return -1;
   }
+  // std::cout << "Adding file with fd= " << fd << std::endl;
   if (block_fd_temp_name.find(fd) == block_fd_temp_name.end()){
     block_fd_temp_name.insert(std::pair<int, std::string>(fd, std::string(temporary_file_name_template)));
   }

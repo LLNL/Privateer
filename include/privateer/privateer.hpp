@@ -317,51 +317,10 @@ inline void Privateer::msync(){
   vmm->msync();
 }
 
-// TODO: Redesign and Rewrite
-/* bool Privateer::snapshot(const char* version_metadata_path){
-  // Create new version metadata directory
-  if(utility::directory_exists(version_metadata_path)){
-    std::cerr << "Error: Version metadata directory already exists" << std::endl;
-    return false;
-  }
 
-  if (!utility::create_directory(version_metadata_path)){
-    std::cerr << "Error: Failed to create version metadata directory" << std::endl;
-  }
-
-  // temporarily change metadata file descriptor
-  int temp_metada_fd = metadata_fd;
-  std::string snapshot_metadata_path = std::string(version_metadata_path) + "/_metadata";
-  // std::cout << "Privateer: Snapshotting to " << snapshot_metadata_path << std::endl;
-  metadata_fd = ::open(snapshot_metadata_path.c_str(), O_RDWR | O_CREAT, (mode_t) 0666);
-  assert(metadata_fd != -1);
-  msync();
-  metadata_fd = temp_metada_fd;
-
-  // Create file to save blocks path
-  std::string blocks_path_file_name = std::string(version_metadata_path) + "/_blocks_path";
-  std::ofstream blocks_path_file;
-  blocks_path_file.open(blocks_path_file_name);
-  blocks_path_file << blocks_dir_path;
-  blocks_path_file.close();
-
-  // Create file to save current size
-  std::string size_path_file_name = std::string(version_metadata_path) + "/_size";
-  std::ofstream size_path_file;
-  size_path_file.open(size_path_file_name);
-  size_path_file << m_current_size;
-  size_path_file.close();
-
-
-  // Create file to save max. capacity
-  std::string capacity_path_file_name = std::string(version_metadata_path) + "/_capacity";
-  std::ofstream capacity_path_file;
-  capacity_path_file.open(capacity_path_file_name);
-  capacity_path_file << m_max_size;
-  capacity_path_file.close();
-
-  return true;
-} */
+bool Privateer::snapshot(const char* version_metadata_path){
+  return vmm->snapshot(version_metadata_path);
+}
 
 
 

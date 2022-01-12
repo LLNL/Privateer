@@ -49,7 +49,6 @@ int main(int argc, char** argv) {
 
   // size_t chunk_size = 16777216;
   // Treaded Init
-  std::cout << "Initializing..." << std::endl;
   #pragma omp parallel for
   for (size_t i = 0; i < num_ints; ++i) {
     the_ints[i] = (num_ints - 1) - i;
