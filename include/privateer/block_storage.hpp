@@ -88,6 +88,8 @@ block_storage::block_storage(const block_storage &block_storage){
   block_granularity = block_storage.block_granularity;
   block_fd_hash = block_storage.block_fd_hash;
   block_fd_temp_name = block_storage.block_fd_temp_name;
+  stash_directory = block_storage.stash_directory;
+  stash_block_ids = block_storage.stash_block_ids;
   // store_block_mutex =  new std::mutex();// block_storage.store_block_mutex; // new bip::named_mutex(bip::open_or_create, "store_block_mutex");
   /* store_block_mutex = block_storage.store_block_mutex;
   create_block_directory_mutex = block_storage.create_block_directory_mutex; */

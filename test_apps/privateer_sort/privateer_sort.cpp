@@ -82,8 +82,9 @@ int main(int argc, char** argv) {
   //
   // Sort
   double sort_start = omp_get_wtime();
-  __gnu_parallel::sort(the_ints, the_ints + num_ints, std::less<uint64_t>(),
-                       __gnu_parallel::quicksort_tag());
+  /* __gnu_parallel::sort(the_ints, the_ints + num_ints, std::less<uint64_t>(),
+                       __gnu_parallel::quicksort_tag()); */
+  std::sort(the_ints, the_ints + num_ints);
   double sort_end = omp_get_wtime();
   double sort_msync_start = omp_get_wtime();
   priv->msync();
