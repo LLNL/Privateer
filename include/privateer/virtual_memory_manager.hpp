@@ -171,10 +171,6 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
 
 void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr){
   
-  // Evict if needed
-
-  // evict_if_needed();
-
   // Get and assert faulting address
   uint64_t fault_address = (uint64_t) si->si_addr;
   uint64_t start_address = (uint64_t) m_region_start_address;
@@ -188,7 +184,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
   uint64_t block_address = start_address + block_index * m_block_size;
   bool is_write_fault = ctx->uc_mcontext.gregs[REG_ERR] & 0x2;
   
-  if (present_blocks.find((uint64_t) block_address) != present_blocks.end()){
+  if (present_blocks.find((uint64_t) block_address) != present_blocks.end()){ // Block is present in-memory (just change prot and LRU if needed)
     if (is_write_fault){
       // Move from clean_lru to dirty_lru
       clean_lru.remove((uint64_t) block_address);
@@ -200,47 +196,50 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       exit(-1);
     }
   }
-  else{
+  else{ // block is not present in-memory
     evict_if_needed();
-    // Read backing block if exists
+
+    int prot = is_write_fault ? PROT_WRITE : PROT_READ;
+
+    // Check if backing block exists
     int backing_block_fd = -1;
     std::string backing_block_path = "";
     std::string stash_backing_block_path = m_block_storage->get_block_stash_path(block_index); 
     std::string blocks_path = m_block_storage->get_blocks_path();
     // std::cout << "block_index = " << block_index << std::endl;
     if (!stash_backing_block_path.empty()){
-      std::cout << "Getting block: " << block_index << " from stash " << stash_backing_block_path << std::endl;
+      // std::cout << "Getting block: " << block_index << " from stash " << stash_backing_block_path << std::endl;
       backing_block_path = stash_backing_block_path;
     }
     else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){
-      std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
+      // std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
       backing_block_path = m_block_storage->get_blocks_subdirectory(block_index) + "/" + blocks_ids[block_index];
     }
     
-    // shm_open
-    boost::uuids::uuid uuid = boost::uuids::random_generator()();
-    const std::string block_name = boost::lexical_cast<std::string>(uuid);
-    int shm_fd = shm_open(block_name.c_str(), O_CREAT | O_RDWR, S_IWUSR);
-    if (shm_fd == -1){
-      std::cerr << "Error shm_open: " << strerror(errno) << std::endl;
-    }
-    int trunc_status = ftruncate(shm_fd, m_block_size);
-    if (trunc_status == -1){
-      std::cerr << "Error ftruncate: " << strerror(errno) << std::endl;
-    }
-    // shm_unlink
-    if (shm_unlink(block_name.c_str()) == -1){
-      std::cerr << "virtual_memory_manager: Error shm_unlink: " << strerror(errno) << std::endl;
-      exit(-1);
-    }
-    // mmap temporary location
-    void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (temp_buffer == MAP_FAILED){
-      std::cerr << "Error mmap temp: " << strerror(errno) << std::endl;
-      exit(-1);
-    }
+    if (!backing_block_path.empty()){ // Backing block exists
 
-    if (!backing_block_path.empty()){
+      // shm_open
+      boost::uuids::uuid uuid = boost::uuids::random_generator()();
+      const std::string block_name = boost::lexical_cast<std::string>(uuid);
+      int shm_fd = shm_open(block_name.c_str(), O_CREAT | O_RDWR, S_IWUSR);
+      if (shm_fd == -1){
+        std::cerr << "Error shm_open: " << strerror(errno) << std::endl;
+      }
+      int trunc_status = ftruncate(shm_fd, m_block_size);
+      if (trunc_status == -1){
+        std::cerr << "Error ftruncate: " << strerror(errno) << std::endl;
+      }
+      // shm_unlink
+      if (shm_unlink(block_name.c_str()) == -1){
+        std::cerr << "virtual_memory_manager: Error shm_unlink: " << strerror(errno) << std::endl;
+        exit(-1);
+      }
+      // mmap temporary location
+      void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+      if (temp_buffer == MAP_FAILED){
+        std::cerr << "Error mmap temp: " << strerror(errno) << std::endl;
+        exit(-1);
+      }
       // read block content into temporary buffer
       backing_block_fd = open(backing_block_path.c_str(), O_RDONLY);
       if (backing_block_fd == -1){
@@ -254,30 +253,31 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       if (close(backing_block_fd) == -1){
         std::cout << "virtual_memory_manager: Error closing backing block: " << backing_block_path << " - " << strerror(errno) << std::endl;
       }
-    }
-    else{ // Zero page
-      memset(temp_buffer, 0, m_block_size);
-    }
-    
-    // mmap original block
-    int prot = is_write_fault ? PROT_WRITE : PROT_READ;
-    void *mmap_block_address = mmap((void*) block_address, m_block_size, prot, MAP_PRIVATE | MAP_FIXED, shm_fd,0);
-    if (mmap_block_address == MAP_FAILED){
-      std::cerr << "virtual_memory_manager: Error remapping address: " << block_address << std::endl;
-      exit(-1);
-    }
-    // unmap temp buffer
-    int munmap_status = munmap(temp_buffer, m_block_size);
-    if (munmap_status == -1){
-      std::cerr << "virtual_memory_manager: Error unmapping temp buffer: " << (uint64_t) temp_buffer << " for faulting block address: " << block_address << std::endl;
-      exit(-1);
-    }
-    // close shm_fd
-    if (close(shm_fd) == -1){
-      std::cerr << "virtual_memory_manager: Error closing shm_fd: " << strerror(errno) << std::endl;
-      exit(-1);
-    }
 
+      // mmap original block
+      void *mmap_block_address = mmap((void*) block_address, m_block_size, prot, MAP_PRIVATE | MAP_FIXED, shm_fd,0);
+      if (mmap_block_address == MAP_FAILED){
+        std::cerr << "virtual_memory_manager: Error remapping address: " << block_address << std::endl;
+        exit(-1);
+      }
+      // unmap temp buffer
+      int munmap_status = munmap(temp_buffer, m_block_size);
+      if (munmap_status == -1){
+        std::cerr << "virtual_memory_manager: Error unmapping temp buffer: " << (uint64_t) temp_buffer << " for faulting block address: " << block_address << std::endl;
+        exit(-1);
+      }
+      // close shm_fd
+      if (close(shm_fd) == -1){
+        std::cerr << "virtual_memory_manager: Error closing shm_fd: " << strerror(errno) << std::endl;
+        exit(-1);
+      }
+    }
+    else{ // No backing block yet, just change mprotect
+      if (mprotect((void*) block_address, m_block_size, prot) == -1){
+        std::cerr << "virtual_memory_manager: Error changing PROT for block: " << block_address << " - " << strerror(errno) << std::endl;
+        exit(-1);
+      }
+    }
     // Update LRUs
     if (is_write_fault){
       dirty_lru.push_front(block_address);
@@ -294,7 +294,7 @@ void virtual_memory_manager::evict_if_needed(){
   if ((present_blocks.size()*m_block_size) >= m_max_mem_size){
     if (clean_lru.size() > 0){
         to_evict = (void*) clean_lru.back();
-        std::cout << "Evicting clean block: " << ((uint64_t) to_evict - (uint64_t) m_region_start_address) / m_block_size << std::endl;
+        // std::cout << "Evicting clean block: " << ((uint64_t) to_evict - (uint64_t) m_region_start_address) / m_block_size << std::endl;
         clean_lru.pop_back();
     }
     else{
@@ -303,7 +303,7 @@ void virtual_memory_manager::evict_if_needed(){
       dirty_lru.pop_back();
       // std::cout << "Hello from the other side" << std::endl;
       uint64_t block_index = ((uint64_t) to_evict - (uint64_t) m_region_start_address) / m_block_size;
-      std::cout << "stashing block: " << block_index << std::endl;
+      // std::cout << "stashing block: " << block_index << std::endl;
       if (!m_block_storage->stash_block(to_evict, block_index)){
         std::cerr << "Virtual memory manager: Error stashing block with index: " << block_index << std::endl;
         exit(-1);
@@ -351,6 +351,9 @@ void virtual_memory_manager::msync(){
         std::cerr << "virtual_memory_manager: mprotect error for block with address: " << (uint64_t) block_address << " " << strerror(errno) << std::endl;
         exit(-1);
       }
+      if (close(block_fd) == -1){
+        std::cerr << "virtual_memory_manager: Error closing file descriptor for block: " << block_index << " - " << strerror(errno) << std::endl;
+      }
       clean_lru.push_front((uint64_t)block_address);
     }
   }
@@ -364,7 +367,7 @@ void virtual_memory_manager::msync(){
     block_storage block_storage_local(*m_block_storage);
     void* block_address = (void*) *stash_iterator;
     uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
-    std::string block_hash = block_storage_local.commit_stash_block(block_index);
+    std::string block_hash = /* block_storage_local.*/m_block_storage->commit_stash_block(block_index);
     if (block_hash.empty()){
       std::cerr << "virtual_memory_manager: Error committing stash block with address: " << (uint64_t) block_address << std::endl;
       exit(-1);

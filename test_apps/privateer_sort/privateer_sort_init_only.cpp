@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
   // Create mmap
   // multi_mmap_private mapper(std::string(fname), size_bytes);
   // size_t* the_ints = (size_t*)mapper.data();
-  std::string stash_path = std::string(fname) + "_stash";
+  std::string stash_path = std::string(fname) + "_stash_init";
   std::string blocks_path = std::string(fname) + "_blocks";
   Privateer* priv = new Privateer(nullptr, blocks_path.c_str(), fname, stash_path.c_str(), size_bytes);
   size_t* the_ints = (size_t*)priv->data();
@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
 
   // size_t chunk_size = 16777216;
   // Treaded Init
-  #pragma omp parallel for
+  // #pragma omp parallel for
   for (size_t i = 0; i < num_ints; ++i) {
     the_ints[i] = (num_ints - 1) - i;
     // the_ints[i] = ((num_ints - 1)/chunk_size) - (i / chunk_size);
@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
 
   double init_end = omp_get_wtime();
   std::cout << "Initialization done" << std::endl;
-  std::cout << "msync..." << std::endl; 
+  std::cout << "msync..." << std::endl;
   double init_msync_start = omp_get_wtime();
   priv->msync();
   double init_msync_end = omp_get_wtime();

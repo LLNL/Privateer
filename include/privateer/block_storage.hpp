@@ -381,6 +381,10 @@ std::string block_storage::commit_stash_block(uint64_t block_index){
   if (munmap(temp_buffer, block_granularity) == -1){
     std::cerr << "block_storage: Error unmapping temp buffer for stash block - " << strerror(errno) << std::endl;
   }
+  if (close(block_fd) == -1){
+    std::cerr << "block_storage: Error closing file " << strerror(errno) << std::endl;
+    exit(-1);
+  }
   // Compute block hash
   std::string subdirectory_name = get_blocks_subdirectory(block_index);
   

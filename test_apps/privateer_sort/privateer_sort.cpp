@@ -109,9 +109,9 @@ int main(int argc, char** argv) {
       // std::cout << "i: " << i << "the_ints[i]: " << the_ints[i] << std::endl;
       // failed = true;
     }
-    if (i % 1048576 == 0){
+    /* if (i % 1048576 == 0){
       std::cout << "block: " << (i / 1048576) << " passed" << std::endl;
-    }
+    } */
   }
   // std::cout << "Failed: " << failed << std::endl;
   double validate_end = omp_get_wtime();
