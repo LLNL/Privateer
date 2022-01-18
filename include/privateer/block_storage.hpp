@@ -39,6 +39,7 @@ class block_storage
     int create_temporary_unique_block(char* name_template, const char* original_path, uint64_t file_index);
     bool store_block(int fd, void* buffer, bool write_file, uint64_t file_index);
     bool stash_block(void* block_start, uint64_t block_index);
+    bool unstash_block(uint64_t block_index);
     std::string commit_stash_block(uint64_t block_index);
     int get_block_fd(const char* hash, uint64_t file_index);
     char* get_block_hash(int fd);
@@ -357,6 +358,22 @@ bool block_storage::stash_block(void* block_start, uint64_t block_index){
     std::cerr << "block_storage: Error closing stash file: " << strerror(errno) << std::endl;
     return false;
   }
+  return true;
+}
+
+bool block_storage::unstash_block(uint64_t block_index){
+  if (stash_block_ids.find(block_index) == stash_block_ids.end()){
+    std::cerr << "block_storage: Error unstashing block with index= " << block_index << " No backing stash block" << std::endl; 
+    return false;
+  }
+  std::string block_UUID = stash_block_ids[block_index];
+  std::string block_temp_path = stash_directory + "/" + block_UUID;
+  // remove file
+  if (remove(block_temp_path.c_str()) == -1){
+    return false;
+  }
+  // remove block_index from stash_block_ids
+  stash_block_ids.erase(block_index);
   return true;
 }
 

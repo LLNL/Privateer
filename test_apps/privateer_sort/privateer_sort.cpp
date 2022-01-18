@@ -97,12 +97,13 @@ int main(int argc, char** argv) {
   bool failed = false;
   //end temp
 
- // size_t chunk_size = 16777216;
-#pragma omp parallel for
+ size_t chunk_size = 4*1024*1024L;
+// #pragma omp parallel for
   for (size_t i = 0; i < num_ints; ++i) {
     /* if (i % chunk_size == 0){
       std::cout << "i: " << i << " the_ints[i]: " << the_ints[i] << std::endl;
     } */
+    
     if (the_ints[i] != i) {
       std::cerr << "Failed to Validate " << i << " " << the_ints[i] << std::endl;
       exit(-1);
