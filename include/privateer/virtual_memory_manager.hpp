@@ -342,27 +342,27 @@ void virtual_memory_manager::msync(){
   // 1) Write dirty_lru
   std::cout << "size of dirty LRU: "<< dirty_lru.size() << std::endl;
   std::vector<uint64_t> dirty_lru_vector(dirty_lru.begin(), dirty_lru.end());
-  // #pragma omp parallel for
+  #pragma omp parallel for
   for (auto dirty_lru_iterator = dirty_lru_vector.begin(); dirty_lru_iterator != dirty_lru_vector.end(); ++dirty_lru_iterator){
-    // block_storage block_storage_local(*m_block_storage);
+    block_storage block_storage_local(*m_block_storage);
     void* block_address = (void*) *dirty_lru_iterator;
     // if (stash_set.find((uint64_t) block_address) == stash_set.end()){
       uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
       std::string temporary_file_name_template = std::to_string(block_index) + "_temp_XXXXXX";
       char* name_template = (char*) temporary_file_name_template.c_str();
-      int block_fd = /*block_storage_local.*/ m_block_storage->create_temporary_unique_block(name_template, block_index); // , existing_block_file_name.c_str());
+      int block_fd = /* m_block_storage-> */ block_storage_local.create_temporary_unique_block(name_template, block_index); // , existing_block_file_name.c_str());
       if (block_fd == -1){
         std::cerr << "virtual_memory_manager: Error creating temporary file"<< std::endl;
         exit(-1);
       }
       bool write_block_fd = true;
-      bool status = /* block_storage_local.*/ m_block_storage->store_block(block_fd, block_address, write_block_fd, block_index);
+      bool status = /* m_block_storage-> */ block_storage_local.store_block(block_fd, block_address, write_block_fd, block_index);
       if (!status){
         std::cerr << "virtual_memory_manager: Error storing block with index " << block_index << std::endl;
         exit(-1);
       }
       
-      blocks_ids[block_index] = std::string(/* block_storage_local.*/ m_block_storage->get_block_hash(block_fd));
+      blocks_ids[block_index] = std::string(/* m_block_storage-> */block_storage_local.get_block_hash(block_fd));
       // Change mprotect to read_only
       int mprotect_stat = mprotect(block_address, m_block_size, PROT_READ);
       if (mprotect_stat == -1){
@@ -373,8 +373,10 @@ void virtual_memory_manager::msync(){
         std::cerr << "virtual_memory_manager: Error closing file descriptor for block: " << block_index << " - " << strerror(errno) << std::endl;
         exit(-1);
       }
-      // #pragma omp critial
-      clean_lru.push_front((uint64_t)block_address);
+      #pragma omp critial
+      {
+        clean_lru.push_front((uint64_t)block_address);
+      }
     // }
   }
   dirty_lru.clear();
@@ -382,20 +384,20 @@ void virtual_memory_manager::msync(){
   // 2) Commit stashed blocks
   std::cout << "SIZE OF STASH SET: " << stash_set.size() << std::endl;
   std::vector<uint64_t> stash_vector(stash_set.begin(), stash_set.end());
-  // #pragma omp parallel for
+  #pragma omp parallel for
   for (auto stash_iterator = stash_vector.begin(); stash_iterator != stash_vector.end(); ++stash_iterator){
     block_storage block_storage_local(*m_block_storage);
     void* block_address = (void*) *stash_iterator;
     uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
-    // #pragma omp critical
-    // {
+    #pragma omp critical
+    {
       std::string block_hash = /* block_storage_local.*/ m_block_storage->commit_stash_block(block_index);
       if (block_hash.empty()){
         std::cerr << "virtual_memory_manager: Error committing stash block with address: " << (uint64_t) block_address << std::endl;
         exit(-1);
       }
       blocks_ids[block_index] = block_hash;
-    // }
+    }
   }
   stash_set.clear();
   update_metadata();
