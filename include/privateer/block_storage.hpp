@@ -106,13 +106,11 @@ void block_storage::create(std::string base_directory_path, std::string stash_di
   stash_directory = stash_directory_path;
   if (!stash_directory.empty()){
     // Create stash directory
-    if (utility::directory_exists(stash_directory_path.c_str())){
-      std::cerr << "Error: Stash directory already exists" << std::endl;
-      exit(-1);
-    }
-    if (!utility::create_directory(stash_directory_path.c_str())){
-      std::cerr << "Error: Failed to create stash directory" << std::endl;
-      exit(-1);
+    if (!utility::directory_exists(stash_directory_path.c_str())){
+      if (!utility::create_directory(stash_directory_path.c_str())){
+        std::cerr << "Error: Failed to create stash directory" << std::endl;
+        exit(-1);
+      }
     }
   }
   // std::cout << "block_storage: Base directory path arg = " << base_directory_path << std::endl;
@@ -148,13 +146,11 @@ void block_storage::open(std::string base_directory_path, std::string stash_dire
   stash_directory = stash_directory_path;
   if (!stash_directory.empty()){
     // Create stash directory
-    if (utility::directory_exists(stash_directory_path.c_str())){
-      std::cerr << "Error: Stash directory already exists" << std::endl;
-      exit(-1);
-    }
-    if (!utility::create_directory(stash_directory_path.c_str())){
-      std::cerr << "Error: Failed to create stash directory" << std::endl;
-      exit(-1);
+    if (!utility::directory_exists(stash_directory_path.c_str())){
+      if (!utility::create_directory(stash_directory_path.c_str())){
+        std::cerr << "Error: Failed to create stash directory" << std::endl;
+        exit(-1);
+      }
     }
   }
   if(!utility::directory_exists(base_directory_path.c_str())){
