@@ -37,8 +37,9 @@ int main(int argc, char** argv) {
   // size_t* the_ints = (size_t*)mapper.data();
   std::string stash_path = std::string(fname) + "_stash_init";
   std::string blocks_path = std::string(fname) + "_blocks";
-  Privateer* priv = new Privateer(nullptr, blocks_path.c_str(), fname, stash_path.c_str(), size_bytes);
-  size_t* the_ints = (size_t*)priv->data();
+  std::string image_name = "version_0";
+  Privateer* priv = new Privateer(Privateer::CREATE, fname);
+  size_t* the_ints = (size_t*) priv->create(nullptr, image_name.c_str(), size_bytes);
   size_t num_ints = size_bytes / sizeof(size_t); // Is this correct or should we add "get_size()" to privateer and use it here?
 
 

@@ -94,13 +94,6 @@ virtual_memory_manager::virtual_memory_manager(void* start_address, size_t block
 
   m_read_only = false;
 
-  // Define the signal and associate with handler
-  /* struct sigaction sa;
-  sa.sa_flags = SA_SIGINFO;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_sigaction = handler;
-  if (sigaction(SIGSEGV, &sa, NULL) == -1)
-    std::cerr << "Error: sigaction failed" << std::endl; */
 };
 
 // Open
