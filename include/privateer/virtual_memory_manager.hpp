@@ -583,6 +583,7 @@ void virtual_memory_manager::create_version_metadata(const char* version_metadat
 }
 
 virtual_memory_manager::~virtual_memory_manager(){
+  msync();
   std::set<uint64_t>::iterator it;
   for (it = present_blocks.begin(); it != present_blocks.end(); ++it) {
       void* address = (void*) *it;
@@ -593,4 +594,5 @@ virtual_memory_manager::~virtual_memory_manager(){
       }
   }
   delete [] blocks_ids;
+  delete m_block_storage;
 }

@@ -70,6 +70,7 @@ int main(int argc, char** argv) {
   std::cout << "Init Time:     " << init_end - init_start << std::endl
             << "Init Msync Time:     " << init_msync_end - init_msync_start
             << std::endl;
+  delete priv;
   // debug: validate
   /* for (size_t i = 0; i < num_ints; ++i){
     assert(the_ints[i] == ((num_ints - 1) - i));
