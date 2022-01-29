@@ -81,8 +81,12 @@ int main(int argc, char** argv) {
         size_t values_size = region_capacity / sizeof(size_t);
         // Validate
         for (size_t j = 0; j < values_size; j++){
-          assert(data[j] == j);
+          if(data[j] != j){
+            std::cerr << "Failed to validate" << std::endl;
+            exit(-1);
+          }
         }
+        std::cout << "Validated Successfully" << std::endl;
       }
     }
 

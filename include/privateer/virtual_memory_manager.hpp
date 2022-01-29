@@ -24,14 +24,15 @@
 
 class virtual_memory_manager {
   public:
-    virtual_memory_manager(void* start_address, size_t block_size, size_t region_max_capacity, size_t max_mem_size_blocks,
+    virtual_memory_manager(void* start_address, size_t region_max_capacity, 
                                                     std::string versioin_metadata_path, std::string blocks_path, std::string stash_path);
-    virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only, size_t max_mem_size_blocks);
+    virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only);
     ~virtual_memory_manager();
     void msync();
     void handler(int sig, siginfo_t *si, void *ctx_void_ptr);
     void* get_region_start_address();
     size_t version_capacity(std::string version_path);
+    size_t current_region_capacity();
     bool snapshot(const char* version_metadata_path);
   private:
     void* m_region_start_address;
@@ -40,12 +41,15 @@ class virtual_memory_manager {
     size_t m_max_mem_size;
     std::string m_version_metadata_path;
     bool m_read_only;
+    int metadata_fd;
     std::list<uint64_t> clean_lru;
     std::list<uint64_t> dirty_lru;
     std::set<uint64_t> stash_set;
     std::set<uint64_t> present_blocks;
     std::string *blocks_ids;
     
+    static const size_t FILE_GRANULARITY_DEFAULT_BYTES;
+    static const size_t MAX_MEM_DEFAULT_BLOCKS;
     static const size_t HASH_SIZE;
     static const std::string EMPTY_BLOCK_HASH;
 
@@ -53,24 +57,55 @@ class virtual_memory_manager {
 
     void evict_if_needed();
     void update_metadata();
+    void create_version_metadata(const char* version_metadata_dir_path, const char* block_storage_dir_path, size_t version_capacity);
 };
 
+const size_t virtual_memory_manager::FILE_GRANULARITY_DEFAULT_BYTES = 2*134217728; // 128 MBs 
+const size_t virtual_memory_manager::MAX_MEM_DEFAULT_BLOCKS = 1024;
 const size_t virtual_memory_manager::HASH_SIZE = 64;
 const std::string virtual_memory_manager::EMPTY_BLOCK_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
 
 // TODO IMPORTANT: Make create() and open() interfaces
 // Create
-virtual_memory_manager::virtual_memory_manager(void* start_address, size_t block_size, size_t region_max_capacity, size_t max_mem_size_blocks,
+virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region_max_capacity,
                                                     std::string version_metadata_path, std::string blocks_path, std::string stash_path){
-  m_block_size = block_size;
+  // Verify system page alignment
+  size_t pagesize = sysconf(_SC_PAGE_SIZE);
+  if ((uint64_t) start_address % pagesize != 0){
+    std::cerr << "Error: start_address is not system-page aligned" << std::endl;
+    exit(-1);
+  }
+
+  // Set block_size and verify multiple of system's page size
+  m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
+  if ( std::isnan(m_block_size) || m_block_size == 0){
+    m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
+  }
+  if (m_block_size % pagesize != 0){
+    std::cerr << "Error: block_size must be multiple of system page size (" << pagesize << ")" << std::endl;
+    exit(-1);
+  }
+  // Verity region capacity is multiple of block size
+  if (region_max_capacity % m_block_size != 0 && region_max_capacity != 0){
+    std::cerr << "Virtual Memory Manager: Error - region size must be a non-zero multiple of block size" << std::endl;
+    exit(-1);
+  }
+
+  size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
+  if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
+    max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
+  }
+  
+  create_version_metadata(version_metadata_path.c_str(), blocks_path.c_str(), region_max_capacity);
+
+  // m_block_size = block_size;
   m_region_max_capacity = region_max_capacity;
-  size_t max_mem_size_bytes = max_mem_size_blocks * m_block_size;
-  m_max_mem_size = ((size_t)(max_mem_size_bytes / m_block_size)) * m_block_size;
+  m_max_mem_size = max_mem_size_blocks * m_block_size;
   std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
   m_version_metadata_path = version_metadata_path;
 
 
-  m_block_storage = new block_storage(blocks_path, stash_path, block_size);
+  m_block_storage = new block_storage(blocks_path, stash_path, m_block_size);
   
   size_t num_blocks = m_region_max_capacity / m_block_size;
   std::cout << "num_blocks: " << num_blocks << std::endl;
@@ -94,10 +129,10 @@ virtual_memory_manager::virtual_memory_manager(void* start_address, size_t block
 
   m_read_only = false;
 
-};
+}
 
 // Open
-virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only, size_t max_mem_size_blocks){
+virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only){
   m_version_metadata_path = version_metadata_path;
   // Read blocks path
   std::string blocks_path_file_name = std::string(m_version_metadata_path) + "/_blocks_path";
@@ -155,8 +190,11 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   }
   delete [] metadata_content;
 
-  size_t max_mem_size_bytes = max_mem_size_blocks * m_block_size;
-  m_max_mem_size = ((size_t)(max_mem_size_bytes / m_block_size)) * m_block_size;
+  size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
+  if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
+    max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
+  }
+  m_max_mem_size = max_mem_size_blocks * m_block_size;
 
   std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
   
@@ -406,7 +444,7 @@ bool virtual_memory_manager::snapshot(const char* version_metadata_path){
   }
 
   if (!utility::create_directory(version_metadata_path)){
-    std::cerr << "Error: Failed to create version metadata directory" << std::endl;
+    std::cerr << "Error: Failed to create version metadata directory at " << version_metadata_path << " - " << strerror(errno) << std::endl;
   }
 
   // temporarily change metadata file descriptor
@@ -508,6 +546,42 @@ size_t virtual_memory_manager::version_capacity(std::string version_path){
   }
 }
 
+size_t virtual_memory_manager::current_region_capacity(){
+  return m_region_max_capacity;
+}
+
+void virtual_memory_manager::create_version_metadata(const char* version_metadata_dir_path, const char* blocks_dir_path, size_t version_capacity){
+  // Create version directory
+  if (utility::directory_exists(version_metadata_dir_path)){
+    std::cerr << "Error: Version metadata directory already exists" << std::endl;
+    exit(-1);
+  }
+  if (!utility::create_directory(version_metadata_dir_path)){
+    std::cerr << "Error: Failed to create version metadata directory at " << version_metadata_dir_path << " - " << strerror(errno) << std::endl;
+    exit(-1);
+  }
+  // Create blocks metadata file
+  std::string metadata_file_name = std::string(version_metadata_dir_path) + "/_metadata";
+  metadata_fd = ::open(metadata_file_name.c_str(), O_RDWR | O_CREAT | O_EXCL, (mode_t) 0666);
+  if (metadata_fd == -1){
+    std::cerr << "Privateer: Error opening metadata file: " << metadata_file_name << " - " << strerror(errno) << std::endl;
+    exit(-1);
+  }
+  // Create file to save blocks path
+  std::string blocks_path_file_name = std::string(version_metadata_dir_path) + "/_blocks_path";
+  std::ofstream blocks_path_file;
+  blocks_path_file.open(blocks_path_file_name);
+  blocks_path_file << blocks_dir_path;
+  blocks_path_file.close();
+
+  // Create capacity file
+  std::string capacity_file_name = std::string(version_metadata_dir_path) + "/_capacity";
+  std::ofstream capacity_file;
+  capacity_file.open(capacity_file_name);
+  capacity_file << version_capacity;
+  capacity_file.close();
+}
+
 virtual_memory_manager::~virtual_memory_manager(){
   std::set<uint64_t>::iterator it;
   for (it = present_blocks.begin(); it != present_blocks.end(); ++it) {
@@ -520,4 +594,3 @@ virtual_memory_manager::~virtual_memory_manager(){
   }
   delete [] blocks_ids;
 }
-

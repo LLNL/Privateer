@@ -57,29 +57,20 @@ public:
 
 private:
   void* open(void* address, const char* version_metadata_path, bool read_only);
-  void *m_addr;
-  uint64_t m_max_size;
-  std::string* blocks;
-  void **regions;
   static size_t const FILE_GRANULARITY_DEFAULT_BYTES;
   static size_t const MAX_MEM_DEFAULT_BLOCKS;
-  static size_t const HASH_SIZE;
   std::string EMPTY_BLOCK_HASH;
   std::string base_dir_path;
   std::string blocks_dir_path;
   std::string stash_dir_path;
   std::string version_metadata_dir_path;
-  int metadata_fd;
   size_t file_granularity;
   size_t max_mem_size_blocks;
-  std::map<std::string,int> block_file_exist_map;
-  bool m_read_only;
   virtual_memory_manager* vmm;
 };
 
 size_t const Privateer::FILE_GRANULARITY_DEFAULT_BYTES = 2*134217728; // 128 MBs 
 size_t const Privateer::MAX_MEM_DEFAULT_BLOCKS = 1024;
-size_t const Privateer::HASH_SIZE = 64; // size of SHA-256 hash
 int const Privateer::CREATE = 0;
 int const Privateer::OPEN = 1;
 
@@ -94,7 +85,7 @@ Privateer::Privateer(int action, const char* base_path){
       exit(-1);
     }
     if (!utility::create_directory(base_path)){
-      std::cerr << "Privateer: Error creating base directory at: " << base_path << "- " << strerror(errno) << std::endl;
+      std::cerr << "Privateer: Error creating base directory at: " << base_path << " - " << strerror(errno) << std::endl;
       exit(-1);
     }
     
@@ -109,70 +100,10 @@ Privateer::Privateer(int action, const char* base_path){
   stash_dir_path = std::string(base_path) + "/" + "stash";
 }
 
-void* Privateer::create(void *addr,const char *version_metadata_path, size_t max_capacity){
-  // Verify system page alignment
-  size_t pagesize = sysconf(_SC_PAGE_SIZE);
-  /* if (original_size % pagesize != 0){
-    std::cerr << "Error: Size must be multiple of page size (" << pagesize << ")" << std::endl;
-  } */
-  if (max_capacity % pagesize != 0){
-    std::cerr << "Error: Capacity must be multiple of system page size (" << pagesize << ")" << std::endl;
-    exit(-1);
-  }
-  // create version metadata directory
-  version_metadata_dir_path = base_dir_path + "/" + std::string(version_metadata_path);
-  if (blocks_dir_path.compare(version_metadata_dir_path) != 0){
-    if (utility::directory_exists(version_metadata_dir_path.c_str())){
-      std::cerr << "Error: Version metadata directory already exists" << std::endl;
-      exit(-1);
-    }
-    if (!utility::create_directory(version_metadata_dir_path.c_str())){
-      std::cerr << "Error: Failed to create version metadata directory" << std::endl;
-    }
-  }
-  // Create blocks metadata file
-  std::string metadata_file_name = std::string(version_metadata_dir_path) + "/_metadata";
-  metadata_fd = ::open(metadata_file_name.c_str(), O_RDWR | O_CREAT | O_EXCL, (mode_t) 0666);
-  if (metadata_fd == -1){
-    std::cerr << "Privateer: Error opening metadata file: " << metadata_file_name << " - " << strerror(errno) << std::endl;
-    exit(-1);
-  }
-
-  // Create file to save blocks path
-  std::string blocks_path_file_name = std::string(version_metadata_dir_path) + "/_blocks_path";
-  std::ofstream blocks_path_file;
-  blocks_path_file.open(blocks_path_file_name);
-  blocks_path_file << blocks_dir_path;
-  blocks_path_file.close();
-
-  // Set file granularity
-  file_granularity = utility::get_environment_variable("PRIVATEER_FILE_GRANULARITY");
-  if ( std::isnan(file_granularity) || file_granularity == 0){
-    file_granularity = FILE_GRANULARITY_DEFAULT_BYTES;
-  }
-  max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
-  if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
-    max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
-  } 
-  std::cout << "block size: " << file_granularity << std::endl;
-  // Handling if requested size is less than file granularity
-  file_granularity = std::min(max_capacity, file_granularity);
-
-  // init block hashes array
-  size_t num_blocks = (size_t)ceil(max_capacity*1.0 / file_granularity);
-
-  size_t ceiled_max_capacity = num_blocks*file_granularity;
-  m_max_size = ceiled_max_capacity;
-
-  // Create capacity file
-  std::string capacity_file_name = std::string(version_metadata_dir_path) + "/_capacity";
-  std::ofstream capacity_file;
-  capacity_file.open(capacity_file_name);
-  capacity_file << m_max_size;
-  capacity_file.close();
-
-  vmm = new virtual_memory_manager(addr, file_granularity, m_max_size, max_mem_size_blocks,
-                                    version_metadata_dir_path, blocks_dir_path, stash_dir_path);
+void* Privateer::create(void *addr,const char *version_metadata_path, size_t region_size){
+  
+  std::string version_metadata_full_path = base_dir_path + "/" + version_metadata_path;
+  vmm = new virtual_memory_manager(addr, region_size, version_metadata_full_path, blocks_dir_path, stash_dir_path);
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
   struct sigaction sa;
   sa.sa_flags = SA_SIGINFO;
@@ -254,7 +185,7 @@ void* Privateer::open(void* addr, const char *version_metadata_path, bool read_o
     max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
   } 
   
-  vmm = new virtual_memory_manager(addr, version_metadata_dir_path, stash_dir_path, read_only, max_mem_size_blocks);
+  vmm = new virtual_memory_manager(addr, version_metadata_dir_path, stash_dir_path, read_only);
 
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
   struct sigaction sa;
@@ -310,7 +241,7 @@ inline void* Privateer::data(){
 
 // TODO: Update to be vmm->region_size
 inline size_t Privateer::region_size(){
-  return m_max_size;
+  return vmm->current_region_capacity();
 }
 
 inline size_t Privateer::version_capacity(std::string version_path){
