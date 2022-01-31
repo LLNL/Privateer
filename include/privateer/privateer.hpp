@@ -57,8 +57,6 @@ public:
 
 private:
   void* open(void* address, const char* version_metadata_path, bool read_only);
-  static size_t const FILE_GRANULARITY_DEFAULT_BYTES;
-  static size_t const MAX_MEM_DEFAULT_BLOCKS;
   std::string EMPTY_BLOCK_HASH;
   std::string base_dir_path;
   std::string blocks_dir_path;
@@ -69,8 +67,7 @@ private:
   virtual_memory_manager* vmm;
 };
 
-size_t const Privateer::FILE_GRANULARITY_DEFAULT_BYTES = 2*134217728; // 128 MBs 
-size_t const Privateer::MAX_MEM_DEFAULT_BLOCKS = 1024;
+
 int const Privateer::CREATE = 0;
 int const Privateer::OPEN = 1;
 
@@ -211,59 +208,22 @@ bool Privateer::snapshot(const char* version_metadata_path){
 
 
 
-// TODO: Redo after finalizing virtual_memomry_manager
+
 inline Privateer::~Privateer()
 {
-  /* void* status = mmap(m_addr, m_current_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (status == MAP_FAILED){
-    std::cerr << "Privateer: Error releasing region" << std::endl;
-    exit(-1);
-  } 
-  std::cout << "Done unmapping regions" << std::endl; */
-  
-  
-  /* delete [] regions;
-  std::cout << "Done deleting regions" << std::endl;
-  
-  delete [] blocks;
-  std::cout << "Done deleting blocks" << std::endl; */
-  
   delete vmm;
-  /* std::cout << "Done deleting block storage" << std::endl;
-  int close_metadata = ::close(metadata_fd);
-  std::cout << "Privateer: Object destroyed successfully" << std::endl; */
 }
 
-// TODO: Update to be vmm->region_ptr
+
 inline void* Privateer::data(){
   return vmm->get_region_start_address();
 }
 
-// TODO: Update to be vmm->region_size
+
 inline size_t Privateer::region_size(){
   return vmm->current_region_capacity();
 }
 
 inline size_t Privateer::version_capacity(std::string version_path){
-  // Read size path
-  std::string size_string;
-  std::string size_file_name = std::string(version_path) + "/_capacity";
-  std::ifstream size_file;
-  size_file.open(size_file_name);
-  if (!size_file.is_open()){
-    std::cerr << "Error opening size file path at: " << size_file_name << std::endl;
-    return (size_t) -1;
-  }
-  if (!std::getline(size_file, size_string)){
-    std::cerr << "Error reading reading file" << std::endl;
-    return (size_t) -1;
-  }
-  try {
-    size_t size = std::stol(size_string);
-    return size;
-  }
-  catch (const std::invalid_argument& ia){
-    std::cerr << "Error parsing version size from file - " << ia.what() << std::endl;
-    return (size_t) -1;
-  }
+  return vmm->version_capacity(version_path);
 }
