@@ -31,9 +31,10 @@ class virtual_memory_manager {
     void msync();
     void handler(int sig, siginfo_t *si, void *ctx_void_ptr);
     void* get_region_start_address();
-    size_t version_capacity(std::string version_path);
+    size_t static version_capacity(std::string version_path);
     size_t current_region_capacity();
     bool snapshot(const char* version_metadata_path);
+    int close();
   private:
     void* m_region_start_address;
     size_t m_block_size;
@@ -87,6 +88,8 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   }
   // Verity region capacity is multiple of block size
   if (region_max_capacity % m_block_size != 0 && region_max_capacity != 0){
+    std::cerr << "region_max_capacity: " <<  region_max_capacity << std::endl;
+    std::cerr << "m_block_size: " << m_block_size << std::endl;
     std::cerr << "Virtual Memory Manager: Error - region size must be a non-zero multiple of block size" << std::endl;
     exit(-1);
   }
@@ -207,6 +210,9 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
   uint64_t start_address = (uint64_t) m_region_start_address;
   if (fault_address < (uint64_t) start_address || fault_address >= (uint64_t) start_address + m_region_max_capacity){
     std::cerr << "Error: Faulting address out of range" << std::endl;
+    std::cerr << "Faulting Address: " << (uint64_t) fault_address << std::endl;
+    std::cerr << "Start:            " << (uint64_t) start_address << std::endl;
+    std::cerr << "End:              " << (uint64_t) start_address + m_region_max_capacity << std::endl;
     exit(-1);
   }
   // Handle page fault
@@ -291,7 +297,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
         exit(-1);
       }
 
-      if (close(backing_block_fd) == -1){
+      if (::close(backing_block_fd) == -1){
         std::cout << "virtual_memory_manager: Error closing backing block: " << backing_block_path << " - " << strerror(errno) << std::endl;
       }
 
@@ -308,7 +314,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
         exit(-1);
       }
       // close shm_fd
-      if (close(shm_fd) == -1){
+      if (::close(shm_fd) == -1){
         std::cerr << "virtual_memory_manager: Error closing shm_fd: " << strerror(errno) << std::endl;
         exit(-1);
       }
@@ -401,7 +407,7 @@ void virtual_memory_manager::msync(){
         std::cerr << "virtual_memory_manager: mprotect error for block with address: " << (uint64_t) block_address << " " << strerror(errno) << std::endl;
         exit(-1);
       }
-      if (close(block_fd) == -1){
+      if (::close(block_fd) == -1){
         std::cerr << "virtual_memory_manager: Error closing file descriptor for block: " << block_index << " - " << strerror(errno) << std::endl;
         exit(-1);
       }
@@ -455,7 +461,7 @@ bool virtual_memory_manager::snapshot(const char* version_metadata_path){
   // std::cout << "Privateer: Snapshotting to " << snapshot_metadata_path << std::endl;
   // TODO: Add check or create in a different way
   int metadata_fd = ::open(snapshot_metadata_path.c_str(), O_RDWR | O_CREAT, (mode_t) 0666);
-  int close_status = close(metadata_fd);
+  int close_status = ::close(metadata_fd);
   
   msync();
   m_version_metadata_path = m_temp_current_metadata_path;
@@ -511,7 +517,7 @@ void virtual_memory_manager::update_metadata(){
     std::cerr << "Error, failed to update metadata and mappings: " << strerror(errno) << std::endl;
     exit(-1);
   }
-  if (close(metadata_fd == -1)){
+  if (::close(metadata_fd == -1)){
     std::cerr << "Virtual Memory Manager: Error closing metadata file after update - " << strerror(errno) << std::endl;
     exit(-1);
   }
@@ -582,7 +588,8 @@ void virtual_memory_manager::create_version_metadata(const char* version_metadat
   capacity_file.close();
 }
 
-virtual_memory_manager::~virtual_memory_manager(){
+int virtual_memory_manager::close(){
+  std::cout << "ByeBye VMM" << std::endl;
   msync();
   std::set<uint64_t>::iterator it;
   for (it = present_blocks.begin(); it != present_blocks.end(); ++it) {
@@ -590,9 +597,18 @@ virtual_memory_manager::~virtual_memory_manager(){
       int status = munmap(address, m_block_size);
       if (status == -1){
         std::cerr << "virtual_memory_manager: Error unmapping region with address: " << *it << " - " << strerror(errno) << std::endl;
-        exit(-1);
+        return -1;
       }
   }
   delete [] blocks_ids;
   delete m_block_storage;
+  m_region_start_address = nullptr;
+  return 0;
+}
+
+virtual_memory_manager::~virtual_memory_manager(){
+  if (close() !=0){
+    std::cerr << "virtual_memory_manager: Error, image not closed appropriately" << std::endl;
+    exit(-1);
+  }
 }

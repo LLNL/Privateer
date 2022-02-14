@@ -24,12 +24,6 @@ FIND_PACKAGE(OpenSSL)
 #  add_definitions(-DUSE_PAGEMAP)
 # endif()
 
-# if (CRYPTOPP_ROOT)
-#  include_directories(${CRYPTOPP_ROOT})
-#  link_libraries(${CRYPTOPP_ROOT}/libcryptopp.a)
-# else ()
-#  message(FATAL_ERROR "Cryptopp850 (https://cryptopp.com/) is required to build Privateer")
-# endif ()
 
 # OpenSSL
 link_libraries(OpenSSL::SSL)
@@ -69,10 +63,38 @@ endif ()
 
 # ---------------------------------------------------------------------------------------------------------- 
 
+include_directories(include)
+include_directories(src)
+
+set(privateer_headers include/privateer/privateer.hpp include/privateer/c_api/privateer.h)
+set(privateer_src src/privateer_c.cpp ${privateer_headers})
+
+add_library(privateer SHARED ${privateer_src} )
+add_library(privateer-static STATIC ${privateer_src} )
+TARGET_LINK_LIBRARIES(privateer rt)
+TARGET_LINK_LIBRARIES(privateer-static rt)
+# OpenSSL
+TARGET_LINK_LIBRARIES(privateer OpenSSL::SSL)
+TARGET_LINK_LIBRARIES(privateer-static OpenSSL::SSL)
+TARGET_LINK_LIBRARIES(privateer OpenSSL::Crypto)
+TARGET_LINK_LIBRARIES(privateer-static OpenSSL::Crypto)
+
+# File System
+TARGET_LINK_LIBRARIES(privateer stdc++fs)
+TARGET_LINK_LIBRARIES(privateer-static stdc++fs)
+
+set_target_properties(privateer-static PROPERTIES OUTPUT_NAME privateer)
+
+install(TARGETS privateer privateer-static
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin )
+
+# install(FILES include/privateer/privateer.hpp DESTINATION include/privateer)
+# install(FILES include/privateer/c_api/privateer.h DESTINATION include/privateer/c_api)
+
 install(DIRECTORY include/privateer DESTINATION include)
 
-include_directories(include)
+# find_package(MPI)
 
-find_package(MPI)
-
-add_subdirectory(test_apps)
+# add_subdirectory(test_apps)

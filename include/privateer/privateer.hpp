@@ -49,8 +49,8 @@ public:
   void msync();
   bool snapshot(const char* version_metadata_path);
   void* data();
+  bool version_exists(const char* version_metadata_path);
   size_t region_size();
-  static size_t version_size(std::string version_path);
   static size_t version_capacity(std::string version_path);
   static const int CREATE;
   static const int OPEN;
@@ -63,10 +63,8 @@ private:
   std::string stash_dir_path;
   std::string version_metadata_dir_path;
   size_t file_granularity;
-  size_t max_mem_size_blocks;
   virtual_memory_manager* vmm;
 };
-
 
 int const Privateer::CREATE = 0;
 int const Privateer::OPEN = 1;
@@ -177,11 +175,6 @@ void* Privateer::open(void* addr, const char *version_metadata_path, bool read_o
 
   version_metadata_dir_path = version_metadata_full_path;
 
-  max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
-  if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
-    max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
-  } 
-  
   vmm = new virtual_memory_manager(addr, version_metadata_dir_path, stash_dir_path, read_only);
 
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
@@ -200,30 +193,29 @@ inline void Privateer::msync(){
   vmm->msync();
 }
 
-
 bool Privateer::snapshot(const char* version_metadata_path){
   std::string version_metadata_full_path = base_dir_path + "/" + version_metadata_path;
   return vmm->snapshot(version_metadata_full_path.c_str());
 }
 
-
-
+bool Privateer::version_exists(const char* version_metadata_path){
+  return utility::directory_exists(version_metadata_path);
+}
 
 inline Privateer::~Privateer()
 {
+  std::cout << "ByeBye Privateer" << std::endl;
   delete vmm;
 }
-
 
 inline void* Privateer::data(){
   return vmm->get_region_start_address();
 }
-
 
 inline size_t Privateer::region_size(){
   return vmm->current_region_capacity();
 }
 
 inline size_t Privateer::version_capacity(std::string version_path){
-  return vmm->version_capacity(version_path);
+  return virtual_memory_manager::version_capacity(version_path);
 }
