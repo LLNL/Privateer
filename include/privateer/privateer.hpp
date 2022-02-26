@@ -42,7 +42,7 @@ public:
 
   ~Privateer();
 
-  void* create(void* addr, const char* version_metadata_path, size_t size);
+  void* create(void* addr, const char* version_metadata_path, size_t size, bool allow_overwrite);
   void* open(void* addr, const char* version_metadata_path);
   void* open_read_only(void* addr, const char* version_metadata_path);
   void* open_immutable(void* addr, const char* version_metadata_path,  const char* new_version_metadata_path);
@@ -95,10 +95,10 @@ Privateer::Privateer(int action, const char* base_path){
   stash_dir_path = std::string(base_path) + "/" + "stash";
 }
 
-void* Privateer::create(void *addr,const char *version_metadata_path, size_t region_size){
+void* Privateer::create(void *addr,const char *version_metadata_path, size_t region_size, bool allow_overwrite){
   
   std::string version_metadata_full_path = base_dir_path + "/" + version_metadata_path;
-  vmm = new virtual_memory_manager(addr, region_size, version_metadata_full_path, blocks_dir_path, stash_dir_path);
+  vmm = new virtual_memory_manager(addr, region_size, version_metadata_full_path, blocks_dir_path, stash_dir_path, allow_overwrite);
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
   struct sigaction sa;
   sa.sa_flags = SA_SIGINFO;
@@ -165,27 +165,30 @@ void* Privateer::open_immutable(void *addr, const char *version_metadata_path, c
 }
 
 void* Privateer::open(void* addr, const char *version_metadata_path, bool read_only){
-
+  // std::cout << "HELLO FROM PRIVATEER OPEN 1" << std::endl;
+  // std::cout << "the path: " << version_metadata_path << std::endl;
   std::string version_metadata_full_path = base_dir_path + "/" + std::string(version_metadata_path);
+  // std::cout << "HELLO FROM PRIVATEER OPEN 1.5" << std::endl;
   // Check if datastore exist
   if(!utility::directory_exists(version_metadata_full_path.c_str())){
     std::cerr << "Error: Directory " << version_metadata_full_path << " does not exists" << std::endl;
     exit(-1);
   }
-
+  // std::cout << "HELLO FROM PRIVATEER OPEN 2" << std::endl;
   version_metadata_dir_path = version_metadata_full_path;
 
   vmm = new virtual_memory_manager(addr, version_metadata_dir_path, stash_dir_path, read_only);
-
+  // std::cout << "HELLO FROM PRIVATEER OPEN 3" << std::endl;
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
   struct sigaction sa;
   sa.sa_flags = SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
   sa.sa_sigaction = utility::sigsegv_handler_dispatcher::handler;
+  // std::cout << "HELLO FROM PRIVATEER OPEN 3.5" << std::endl;
   if (sigaction(SIGSEGV, &sa, NULL) == -1){
     std::cerr << "Error: sigaction failed" << std::endl;
     exit(-1);
-  }
+  } // std::cout << "HELLO FROM PRIVATEER OPEN 4" << std::endl;
   return vmm->get_region_start_address();
 }
 
@@ -204,7 +207,15 @@ bool Privateer::version_exists(const char* version_metadata_path){
 
 inline Privateer::~Privateer()
 {
-  std::cout << "ByeBye Privateer" << std::endl;
+  // std::cout << "ByeBye Privateer" << std::endl;
+  struct sigaction sa;
+  sa.sa_flags = SA_RESETHAND;
+  sigemptyset(&sa.sa_mask);
+  // sa.sa_sigaction = utility::sigsegv_handler_dispatcher::handler;
+  if (sigaction(SIGSEGV, &sa, NULL) == -1){
+    std::cerr << "Error: reset sigaction failed" << std::endl;
+    exit(-1);
+  }
   delete vmm;
 }
 

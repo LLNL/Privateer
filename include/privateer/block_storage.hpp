@@ -74,7 +74,7 @@ block_storage::block_storage(std::string base_directory_path, std::string stash_
 }
 
 block_storage::block_storage(std::string base_directory_path, const size_t block_granularity_arg){
-  std::cout << "calling create blank stash" << std::endl;
+  // std::cout << "calling create blank stash" << std::endl;
   create(base_directory_path, "", block_granularity_arg);
 }
 
@@ -102,7 +102,7 @@ block_storage::~block_storage(){
 }
 
 void block_storage::create(std::string base_directory_path, std::string stash_directory_path, size_t block_granularity_arg){
-  std::cout << "stash directory path at create() " << stash_directory_path << std::endl;
+  // std::cout << "stash directory path at create() " << stash_directory_path << std::endl;
   stash_directory = stash_directory_path;
   if (!stash_directory.empty()){
     // Create stash directory
@@ -136,10 +136,10 @@ void block_storage::create(std::string base_directory_path, std::string stash_di
     granularity_file << block_granularity;
     granularity_file.close();
   }
-  else{
+  /* else{
     std::cerr << "block_storage: Error - Blocks directory already exists" << std::endl;
     exit(-1);
-  }
+  } */
 }
 
 void block_storage::open(std::string base_directory_path, std::string stash_directory_path){

@@ -25,7 +25,7 @@
 class virtual_memory_manager {
   public:
     virtual_memory_manager(void* start_address, size_t region_max_capacity, 
-                                                    std::string versioin_metadata_path, std::string blocks_path, std::string stash_path);
+                                                    std::string versioin_metadata_path, std::string blocks_path, std::string stash_path, bool allow_overwrite);
     virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only);
     ~virtual_memory_manager();
     void msync();
@@ -58,7 +58,7 @@ class virtual_memory_manager {
 
     void evict_if_needed();
     void update_metadata();
-    void create_version_metadata(const char* version_metadata_dir_path, const char* block_storage_dir_path, size_t version_capacity);
+    void create_version_metadata(const char* version_metadata_dir_path, const char* block_storage_dir_path, size_t version_capacity, bool allow_overwrite);
 };
 
 const size_t virtual_memory_manager::FILE_GRANULARITY_DEFAULT_BYTES = 2*134217728; // 128 MBs 
@@ -69,14 +69,14 @@ const std::string virtual_memory_manager::EMPTY_BLOCK_HASH = "000000000000000000
 // TODO IMPORTANT: Make create() and open() interfaces
 // Create
 virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region_max_capacity,
-                                                    std::string version_metadata_path, std::string blocks_path, std::string stash_path){
+                                                    std::string version_metadata_path, std::string blocks_path, std::string stash_path, bool allow_overwrite){
   // Verify system page alignment
   size_t pagesize = sysconf(_SC_PAGE_SIZE);
   if ((uint64_t) start_address % pagesize != 0){
     std::cerr << "Error: start_address is not system-page aligned" << std::endl;
     exit(-1);
   }
-
+  std::cout << "region_max_capacity: " << region_max_capacity << std::endl;
   // Set block_size and verify multiple of system's page size
   m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
   if ( std::isnan(m_block_size) || m_block_size == 0){
@@ -90,8 +90,14 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   if (region_max_capacity % m_block_size != 0 && region_max_capacity != 0){
     std::cerr << "region_max_capacity: " <<  region_max_capacity << std::endl;
     std::cerr << "m_block_size: " << m_block_size << std::endl;
-    std::cerr << "Virtual Memory Manager: Error - region size must be a non-zero multiple of block size" << std::endl;
-    exit(-1);
+    if (region_max_capacity > m_block_size){
+      std::cerr << "Virtual Memory Manager: Error - region size must be a non-zero multiple of block size" << std::endl;
+      exit(-1);
+    }
+    else{
+      std::cout << "WARNING: region capacity less than block size, setting block size to region capacity" << std::endl;
+      m_block_size = region_max_capacity;
+    }
   }
 
   size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
@@ -99,19 +105,19 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
     max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
   }
   
-  create_version_metadata(version_metadata_path.c_str(), blocks_path.c_str(), region_max_capacity);
+  create_version_metadata(version_metadata_path.c_str(), blocks_path.c_str(), region_max_capacity, allow_overwrite);
 
   // m_block_size = block_size;
   m_region_max_capacity = region_max_capacity;
   m_max_mem_size = max_mem_size_blocks * m_block_size;
-  std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
+  // std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
   m_version_metadata_path = version_metadata_path;
 
 
   m_block_storage = new block_storage(blocks_path, stash_path, m_block_size);
   
   size_t num_blocks = m_region_max_capacity / m_block_size;
-  std::cout << "num_blocks: " << num_blocks << std::endl;
+  // std::cout << "num_blocks: " << num_blocks << std::endl;
   blocks_ids = new std::string[num_blocks];
 
   // mmap region with full size
@@ -147,7 +153,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   }
   if (!std::getline(blocks_path_file, blocks_dir_path)){
     std::cerr << "Error reading blocks path file" << std::endl;
-  }
+  } 
   m_block_storage = new block_storage(blocks_dir_path, stash_path);
   m_block_size = m_block_storage->get_block_granularity();
 
@@ -174,7 +180,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     std::cerr << "virtual_memory_manager: mmap error - " << strerror(errno)<< std::endl;
     exit(-1);
   }
-  std::cout << "num_blocks: " << num_blocks << std::endl;
+  // std::cout << "num_blocks: " << num_blocks << std::endl;
   blocks_ids = new std::string[num_blocks];
   char* metadata_content = new char[metadata_size];
   size_t read = ::pread(metadata_fd, (void*) metadata_content, metadata_size, 0);
@@ -198,8 +204,8 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
   }
   m_max_mem_size = max_mem_size_blocks * m_block_size;
-
-  std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
+  // std::cout << "RETURNING FROM CONSTRUCTOR" << std::endl;
+  // std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
   
 }
 
@@ -258,7 +264,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       backing_block_path = stash_backing_block_path;
     }
     else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){
-      std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
+      // std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
       backing_block_path = m_block_storage->get_blocks_subdirectory(block_index) + "/" + blocks_ids[block_index];
     }
     
@@ -378,7 +384,7 @@ void virtual_memory_manager::evict_if_needed(){
 void virtual_memory_manager::msync(){
   
   // 1) Write dirty_lru
-  std::cout << "size of dirty LRU: "<< dirty_lru.size() << std::endl;
+  // std::cout << "size of dirty LRU: "<< dirty_lru.size() << std::endl;
   std::vector<uint64_t> dirty_lru_vector(dirty_lru.begin(), dirty_lru.end());
   #pragma omp parallel for
   for (auto dirty_lru_iterator = dirty_lru_vector.begin(); dirty_lru_iterator != dirty_lru_vector.end(); ++dirty_lru_iterator){
@@ -420,7 +426,7 @@ void virtual_memory_manager::msync(){
   dirty_lru.clear();
   
   // 2) Commit stashed blocks
-  std::cout << "SIZE OF STASH SET: " << stash_set.size() << std::endl;
+  // std::cout << "SIZE OF STASH SET: " << stash_set.size() << std::endl;
   std::vector<uint64_t> stash_vector(stash_set.begin(), stash_set.end());
   #pragma omp parallel for
   for (auto stash_iterator = stash_vector.begin(); stash_iterator != stash_vector.end(); ++stash_iterator){
@@ -506,7 +512,7 @@ void virtual_memory_manager::update_metadata(){
   }
 
   std::string metadata_path = m_version_metadata_path + "/_metadata";
-  std::cout << "update metadata to path: " << metadata_path << std::endl;
+  // std::cout << "update metadata to path: " << metadata_path << std::endl;
   int metadata_fd = open(metadata_path.c_str(), O_RDWR);
   if (metadata_fd == -1){
     std::cerr << "virtual_memory_manager: Error opening metadata file " << strerror(errno) << std::endl;
@@ -556,32 +562,47 @@ size_t virtual_memory_manager::current_region_capacity(){
   return m_region_max_capacity;
 }
 
-void virtual_memory_manager::create_version_metadata(const char* version_metadata_dir_path, const char* blocks_dir_path, size_t version_capacity){
+void virtual_memory_manager::create_version_metadata(const char* version_metadata_dir_path, const char* blocks_dir_path, size_t version_capacity, bool allow_overwrite){
+  std::string metadata_file_name = std::string(version_metadata_dir_path) + "/_metadata";
+  std::string blocks_path_file_name = std::string(version_metadata_dir_path) + "/_blocks_path";
+  std::string capacity_file_name = std::string(version_metadata_dir_path) + "/_capacity";
+
   // Create version directory
   if (utility::directory_exists(version_metadata_dir_path)){
-    std::cerr << "Error: Version metadata directory already exists" << std::endl;
-    exit(-1);
+    if (utility::file_exists(metadata_file_name.c_str()) || utility::file_exists(blocks_path_file_name.c_str()) || utility::file_exists(capacity_file_name.c_str())){
+      if (allow_overwrite){
+        if (!std::filesystem::remove(std::filesystem::path(metadata_file_name)) || !std::filesystem::remove(std::filesystem::path(blocks_path_file_name)) || !std::filesystem::remove(std::filesystem::path(capacity_file_name))){
+          std::cerr << "Error removing existing metadata files" << std::endl;
+          exit(-1);
+        }
+        if (!utility::create_directory(version_metadata_dir_path)){
+          std::cerr << "Error: Failed to create version metadata directory at " << version_metadata_dir_path << " - " << strerror(errno) << std::endl;
+          exit(-1);
+        }
+      }
+      else{
+        std::cerr << "Error: Version metadata already exists" << std::endl;
+        exit(-1);
+      }
+    }
   }
-  if (!utility::create_directory(version_metadata_dir_path)){
+  else if (!utility::create_directory(version_metadata_dir_path)){
     std::cerr << "Error: Failed to create version metadata directory at " << version_metadata_dir_path << " - " << strerror(errno) << std::endl;
     exit(-1);
   }
   // Create blocks metadata file
-  std::string metadata_file_name = std::string(version_metadata_dir_path) + "/_metadata";
   metadata_fd = ::open(metadata_file_name.c_str(), O_RDWR | O_CREAT | O_EXCL, (mode_t) 0666);
   if (metadata_fd == -1){
     std::cerr << "Privateer: Error opening metadata file: " << metadata_file_name << " - " << strerror(errno) << std::endl;
     exit(-1);
   }
   // Create file to save blocks path
-  std::string blocks_path_file_name = std::string(version_metadata_dir_path) + "/_blocks_path";
   std::ofstream blocks_path_file;
   blocks_path_file.open(blocks_path_file_name);
   blocks_path_file << blocks_dir_path;
   blocks_path_file.close();
 
   // Create capacity file
-  std::string capacity_file_name = std::string(version_metadata_dir_path) + "/_capacity";
   std::ofstream capacity_file;
   capacity_file.open(capacity_file_name);
   capacity_file << version_capacity;
@@ -589,7 +610,7 @@ void virtual_memory_manager::create_version_metadata(const char* version_metadat
 }
 
 int virtual_memory_manager::close(){
-  std::cout << "ByeBye VMM" << std::endl;
+  //  << "ByeBye VMM" << std::endl;
   msync();
   std::set<uint64_t>::iterator it;
   for (it = present_blocks.begin(); it != present_blocks.end(); ++it) {

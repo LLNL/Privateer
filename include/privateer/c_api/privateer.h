@@ -9,7 +9,7 @@ extern "C"
 #endif
 
 void* get_privateer_object(int action, const char* base_path);
-void* privateer_create(void* privateer_instance, void* addr, const char* version_metadata_path, uint64_t size);
+void* privateer_create(void* privateer_instance, void* addr, const char* version_metadata_path, uint64_t size, int allow_overwrite);
 void* privateer_open(void* privateer_instance, void* addr, const char* version_metadata_path);
 void* privateer_open_read_only(void* privateer_instance, void* addr, const char* version_metadata_path);
 void* privateer_open_immutable(void* privateer_instance, void* addr, const char* version_metadata_path,  const char* new_version_metadata_path);
