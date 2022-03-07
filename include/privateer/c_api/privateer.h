@@ -21,7 +21,7 @@ uint64_t privateer_region_size(void* privateer_instance);
 static uint64_t privateer_version_capacity(void* privateer_instance, const char* version_path);
 static int get_privateer_action_create();
 static int get_privateer_action_open();
-void delete_privateer_object(void* privateer_object);
+void delete_privateer_object(void* privateer_instance);
 #ifdef __cplusplus
 }
 #endif

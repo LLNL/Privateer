@@ -19,6 +19,8 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <thread>
+#include <mutex>
 
 #include "block_storage.hpp"
 
@@ -56,6 +58,8 @@ class virtual_memory_manager {
 
     block_storage *m_block_storage;
 
+    std::mutex sig_handler_mutex;
+
     void evict_if_needed();
     void update_metadata();
     void create_version_metadata(const char* version_metadata_dir_path, const char* block_storage_dir_path, size_t version_capacity, bool allow_overwrite);
@@ -80,6 +84,7 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   // Set block_size and verify multiple of system's page size
   m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
   if ( std::isnan(m_block_size) || m_block_size == 0){
+    std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
     m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
   }
   if (m_block_size % pagesize != 0){
@@ -106,20 +111,16 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   }
   
   create_version_metadata(version_metadata_path.c_str(), blocks_path.c_str(), region_max_capacity, allow_overwrite);
-
+  
   // m_block_size = block_size;
   m_region_max_capacity = region_max_capacity;
   m_max_mem_size = max_mem_size_blocks * m_block_size;
   // std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
   m_version_metadata_path = version_metadata_path;
 
-
   m_block_storage = new block_storage(blocks_path, stash_path, m_block_size);
-  
-  size_t num_blocks = m_region_max_capacity / m_block_size;
-  // std::cout << "num_blocks: " << num_blocks << std::endl;
-  blocks_ids = new std::string[num_blocks];
 
+  
   // mmap region with full size
   int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE;
   if (start_address != nullptr)
@@ -131,11 +132,16 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
     std::cerr << "virtual_memory_manager: Error mmap-ing region starting address -  " << strerror(errno)<< std::endl;
     exit(-1);
   }
-  
+
+  size_t num_blocks = m_region_max_capacity / m_block_size;
+  std::cout << "num_blocks: " << num_blocks << std::endl;
+  blocks_ids = new std::string[num_blocks];
+  std::cout << "DEBUG: before init blocks_ids" << std::endl;
   for (size_t i = 0 ; i < num_blocks ; i++){
     blocks_ids[i] = EMPTY_BLOCK_HASH;
   }
-
+  std::cout << "DEBUG: after init blocks_ids" << std::endl;
+  
   m_read_only = false;
 
 }
@@ -210,7 +216,8 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
 }
 
 void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr){
-  
+  std::cout << "THE HANDLER GOES HANDLING" << std::endl;
+  const std::lock_guard<std::mutex> lock(sig_handler_mutex);
   // Get and assert faulting address
   uint64_t fault_address = (uint64_t) si->si_addr;
   uint64_t start_address = (uint64_t) m_region_start_address;
@@ -349,6 +356,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     }
     present_blocks.insert((uint64_t)block_address);
   }
+  
 }
 
 void virtual_memory_manager::evict_if_needed(){
