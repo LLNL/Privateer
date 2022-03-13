@@ -66,7 +66,7 @@ class virtual_memory_manager {
 };
 
 const size_t virtual_memory_manager::FILE_GRANULARITY_DEFAULT_BYTES = 2*134217728; // 128 MBs 
-const size_t virtual_memory_manager::MAX_MEM_DEFAULT_BLOCKS = 1024;
+const size_t virtual_memory_manager::MAX_MEM_DEFAULT_BLOCKS = 65536;
 const size_t virtual_memory_manager::HASH_SIZE = 64;
 const std::string virtual_memory_manager::EMPTY_BLOCK_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -134,13 +134,13 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   }
 
   size_t num_blocks = m_region_max_capacity / m_block_size;
-  std::cout << "num_blocks: " << num_blocks << std::endl;
+  // std::cout << "num_blocks: " << num_blocks << std::endl;
   blocks_ids = new std::string[num_blocks];
-  std::cout << "DEBUG: before init blocks_ids" << std::endl;
+  // std::cout << "DEBUG: before init blocks_ids" << std::endl;
   for (size_t i = 0 ; i < num_blocks ; i++){
     blocks_ids[i] = EMPTY_BLOCK_HASH;
   }
-  std::cout << "DEBUG: after init blocks_ids" << std::endl;
+  // std::cout << "DEBUG: after init blocks_ids" << std::endl;
   
   m_read_only = false;
 
@@ -216,7 +216,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
 }
 
 void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr){
-  std::cout << "THE HANDLER GOES HANDLING" << std::endl;
+  // std::cout << "THE HANDLER GOES HANDLING" << std::endl;
   const std::lock_guard<std::mutex> lock(sig_handler_mutex);
   // Get and assert faulting address
   uint64_t fault_address = (uint64_t) si->si_addr;
