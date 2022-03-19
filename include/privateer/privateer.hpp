@@ -39,6 +39,7 @@ class Privateer
 {
 public:
   Privateer(int action, const char* base_path);
+  Privateer(int action, const char* base_path, const char* stash_path);
 
   ~Privateer();
 
@@ -93,6 +94,41 @@ Privateer::Privateer(int action, const char* base_path){
   base_dir_path = std::string(base_path);
   blocks_dir_path = std::string(base_path) + "/" + "blocks";
   stash_dir_path = std::string(base_path) + "/" + "stash";
+}
+
+Privateer::Privateer(int action, const char* base_path, const char* stash_base_path){
+  if (action != CREATE && action != OPEN){
+    std::cerr << "Privateer: Error - Invalid action" << std::endl;
+    exit(-1);
+  }
+  if (action == CREATE){
+    if (utility::directory_exists(base_path)){
+      std::cerr << "Privateer: Error creating datastore - base directory already exists, action must be PRIVATEER::OPEN" << std::endl;
+      exit(-1);
+    }
+    if (utility::directory_exists(stash_base_path)){
+      std::cerr << "Privateer: Error creating datastore - stash directory already exists, action must be PRIVATEER::OPEN" << std::endl;
+      exit(-1);
+    }
+
+    if (!utility::create_directory(base_path)){
+      std::cerr << "Privateer: Error creating base directory at: " << base_path << " - " << strerror(errno) << std::endl;
+      exit(-1);
+    }
+    if (!utility::create_directory(stash_base_path)){
+      std::cerr << "Privateer: Error creating stash directory at: " << stash_base_path << " - " << strerror(errno) << std::endl;
+      exit(-1);
+    }
+    
+  }
+  
+  if (action == OPEN && !utility::directory_exists(base_path)){
+    std::cerr << "Privateer: Error opening datastore - base directory does not exist, action must be PRIVATEER::CREATE" << std::endl;
+    exit(-1);
+  }
+  base_dir_path = std::string(base_path);
+  blocks_dir_path = std::string(base_path) + "/" + "blocks";
+  stash_dir_path = std::string(stash_base_path) + "/" + "stash";
 }
 
 void* Privateer::create(void *addr,const char *version_metadata_path, size_t region_size, bool allow_overwrite){

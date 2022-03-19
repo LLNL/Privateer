@@ -65,7 +65,7 @@ class virtual_memory_manager {
     void create_version_metadata(const char* version_metadata_dir_path, const char* block_storage_dir_path, size_t version_capacity, bool allow_overwrite);
 };
 
-const size_t virtual_memory_manager::FILE_GRANULARITY_DEFAULT_BYTES = 2*134217728; // 128 MBs 
+const size_t virtual_memory_manager::FILE_GRANULARITY_DEFAULT_BYTES = 134217728; // 128 MBs 
 const size_t virtual_memory_manager::MAX_MEM_DEFAULT_BLOCKS = 65536;
 const size_t virtual_memory_manager::HASH_SIZE = 64;
 const std::string virtual_memory_manager::EMPTY_BLOCK_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -148,11 +148,13 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
 
 // Open
 virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only){
+  
   m_version_metadata_path = version_metadata_path;
   // Read blocks path
   std::string blocks_path_file_name = std::string(m_version_metadata_path) + "/_blocks_path";
   std::ifstream blocks_path_file;
   std::string blocks_dir_path;
+  
   blocks_path_file.open(blocks_path_file_name);
   if (!blocks_path_file.is_open()){
     std::cerr << "Error opening blocks file path at: " << blocks_path_file_name << std::endl;
@@ -160,9 +162,10 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   if (!std::getline(blocks_path_file, blocks_dir_path)){
     std::cerr << "Error reading blocks path file" << std::endl;
   } 
+  
   m_block_storage = new block_storage(blocks_dir_path, stash_path);
   m_block_size = m_block_storage->get_block_granularity();
-
+  
   std::string metadata_file_name = std::string(m_version_metadata_path) + "/_metadata";
   int flags = read_only? O_RDONLY: O_RDWR;
   int metadata_fd = ::open(metadata_file_name.c_str(), flags, (mode_t) 0666);
@@ -170,22 +173,23 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   struct stat st;
   fstat(metadata_fd, &st);
   size_t metadata_size = st.st_size;
-
+  
   // Start: Read capacity file
   m_region_max_capacity = version_capacity(version_metadata_path);
-
+  
   size_t num_blocks = m_region_max_capacity / m_block_size;
   int mmap_flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE;
   if (addr != nullptr)
   {
     mmap_flags |= MAP_FIXED;
   }
-
+  
   m_region_start_address = mmap(addr, m_region_max_capacity, PROT_NONE, mmap_flags, -1, 0);
   if (m_region_start_address == MAP_FAILED){
     std::cerr << "virtual_memory_manager: mmap error - " << strerror(errno)<< std::endl;
     exit(-1);
   }
+  
   // std::cout << "num_blocks: " << num_blocks << std::endl;
   blocks_ids = new std::string[num_blocks];
   char* metadata_content = new char[metadata_size];
@@ -194,16 +198,23 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     std::cerr << "virtual_memory_manager: Error reading metadata - " << strerror(errno) << std::endl;
     exit(-1);
   }
-
+  
   std::string all_hashes(metadata_content, metadata_size);
+  
   uint64_t offset = 0;
   // std::cout << "Privateer: Metadata size = " << metadata_size  << std::endl;
   for (size_t i = 0; i < metadata_size; i += HASH_SIZE){
     // std::cout << "Privateer: Initializing blocks and regions, iteration no. " << i << std::endl;
+    
     std::string block_hash(all_hashes, i, HASH_SIZE);
+    
     blocks_ids[i / HASH_SIZE] = block_hash;
+    
   }
+  
+  
   delete [] metadata_content;
+  
 
   size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
   if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
@@ -228,7 +239,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     std::cerr << "End:              " << (uint64_t) start_address + m_region_max_capacity << std::endl;
     exit(-1);
   }
-  // Handle page fault
+  // Handle block fault
   ucontext_t *ctx = (ucontext_t *) ctx_void_ptr;
   uint64_t block_index = (fault_address - start_address) / m_block_size;
   uint64_t block_address = start_address + block_index * m_block_size;
@@ -272,7 +283,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     }
     else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){
       // std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
-      backing_block_path = m_block_storage->get_blocks_subdirectory(block_index) + "/" + blocks_ids[block_index];
+      backing_block_path = m_block_storage->get_block_full_path(block_index, blocks_ids[block_index]) + "/" + blocks_ids[block_index];
     }
     
     if (!backing_block_path.empty()){ // Backing block exists
@@ -400,29 +411,18 @@ void virtual_memory_manager::msync(){
     void* block_address = (void*) *dirty_lru_iterator;
     // if (stash_set.find((uint64_t) block_address) == stash_set.end()){
       uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
-      std::string temporary_file_name_template = std::to_string(block_index) + "_temp_XXXXXX";
-      char* name_template = (char*) temporary_file_name_template.c_str();
-      int block_fd = /* m_block_storage-> */ block_storage_local.create_temporary_unique_block(name_template, block_index); // , existing_block_file_name.c_str());
-      if (block_fd == -1){
-        std::cerr << "virtual_memory_manager: Error creating temporary file"<< std::endl;
-        exit(-1);
-      }
       bool write_block_fd = true;
-      bool status = /* m_block_storage-> */ block_storage_local.store_block(block_fd, block_address, write_block_fd, block_index);
-      if (!status){
+      std::string block_hash = block_storage_local.store_block(block_address, write_block_fd, block_index);
+      if (block_hash.empty()){
         std::cerr << "virtual_memory_manager: Error storing block with index " << block_index << std::endl;
         exit(-1);
       }
       
-      blocks_ids[block_index] = std::string(/* m_block_storage-> */block_storage_local.get_block_hash(block_fd));
+      blocks_ids[block_index] = block_hash;// std::string(block_storage_local.get_block_hash(block_fd));
       // Change mprotect to read_only
       int mprotect_stat = mprotect(block_address, m_block_size, PROT_READ);
       if (mprotect_stat == -1){
         std::cerr << "virtual_memory_manager: mprotect error for block with address: " << (uint64_t) block_address << " " << strerror(errno) << std::endl;
-        exit(-1);
-      }
-      if (::close(block_fd) == -1){
-        std::cerr << "virtual_memory_manager: Error closing file descriptor for block: " << block_index << " - " << strerror(errno) << std::endl;
         exit(-1);
       }
       #pragma omp critial
