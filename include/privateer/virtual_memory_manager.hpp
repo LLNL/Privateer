@@ -24,6 +24,10 @@
 
 #include "block_storage.hpp"
 
+#ifdef USE_COMPRESSION
+#include "utility/compression.hpp"
+#endif
+
 class virtual_memory_manager {
   public:
     virtual_memory_manager(void* start_address, size_t region_max_capacity, 
@@ -76,15 +80,15 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
                                                     std::string version_metadata_path, std::string blocks_path, std::string stash_path, bool allow_overwrite){
   // Verify system page alignment
   size_t pagesize = sysconf(_SC_PAGE_SIZE);
-  if ((uint64_t) start_address % pagesize != 0){
+  if ( ((uint64_t) start_address) % pagesize != 0){
     std::cerr << "Error: start_address is not system-page aligned" << std::endl;
     exit(-1);
   }
-  std::cout << "region_max_capacity: " << region_max_capacity << std::endl;
+  // std::cout << "region_max_capacity: " << region_max_capacity << std::endl;
   // Set block_size and verify multiple of system's page size
   m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
   if ( std::isnan(m_block_size) || m_block_size == 0){
-    std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
+    // std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
     m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
   }
   if (m_block_size % pagesize != 0){
@@ -230,6 +234,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
   // std::cout << "THE HANDLER GOES HANDLING" << std::endl;
   const std::lock_guard<std::mutex> lock(sig_handler_mutex);
   // Get and assert faulting address
+  // std::cout << "STARTING HANDLING" << std::endl;
   uint64_t fault_address = (uint64_t) si->si_addr;
   uint64_t start_address = (uint64_t) m_region_start_address;
   if (fault_address < (uint64_t) start_address || fault_address >= (uint64_t) start_address + m_region_max_capacity){
@@ -239,11 +244,13 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     std::cerr << "End:              " << (uint64_t) start_address + m_region_max_capacity << std::endl;
     exit(-1);
   }
+  
   // Handle block fault
   ucontext_t *ctx = (ucontext_t *) ctx_void_ptr;
   uint64_t block_index = (fault_address - start_address) / m_block_size;
   uint64_t block_address = start_address + block_index * m_block_size;
   bool is_write_fault = ctx->uc_mcontext.gregs[REG_ERR] & 0x2;
+  
   if (present_blocks.find((uint64_t) block_address) != present_blocks.end()){ // Block is present in-memory (just change prot and LRU if needed)
     
     if (is_write_fault){
@@ -287,7 +294,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     }
     
     if (!backing_block_path.empty()){ // Backing block exists
-
+      
       // shm_open
       boost::uuids::uuid uuid = boost::uuids::random_generator()();
       const std::string block_name = boost::lexical_cast<std::string>(uuid);
@@ -316,13 +323,26 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
         std::cerr << "virtual_memory_manager: Error opening backing block: " << backing_block_path  << " for address: " << block_address << " - " << strerror(errno) << std::endl;
         exit(-1);
       }
+      #ifdef USE_COMPRESSION
+      std::cout << "USING COMPRESSION" << std::endl;
+      size_t compressed_block_size = utility::get_file_size(backing_block_path.c_str());
+      void* read_buffer = malloc(compressed_block_size);
+      if (pread(backing_block_fd, read_buffer, m_block_size, 0) == -1){
+        std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
+        exit(-1);
+      }
+      size_t decompressed_size = utility::decompress(read_buffer, temp_buffer);
+      free(read_buffer);
+      #else
       if (pread(backing_block_fd, temp_buffer, m_block_size, 0) == -1){
         std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
         exit(-1);
       }
-
+      #endif
+      
       if (::close(backing_block_fd) == -1){
-        std::cout << "virtual_memory_manager: Error closing backing block: " << backing_block_path << " - " << strerror(errno) << std::endl;
+        std::cerr << "virtual_memory_manager: Error closing backing block: " << backing_block_path << " - " << strerror(errno) << std::endl;
+        exit(-1);
       }
 
       // mmap original block
@@ -367,7 +387,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     }
     present_blocks.insert((uint64_t)block_address);
   }
-  
+  // std::cout << "ENDING HANDLING" << std::endl;
 }
 
 void virtual_memory_manager::evict_if_needed(){

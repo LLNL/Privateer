@@ -24,6 +24,9 @@
 #include "utility/sha256_hash.hpp"
 #include "utility/file_util.hpp"
 #include "utility/system.hpp"
+#ifdef USE_COMPRESSION
+#include "utility/compression.hpp"
+#endif
 
 class block_storage
 {
@@ -55,7 +58,7 @@ class block_storage
     std::string get_blocks_subdirectory(uint64_t block_index, bool on_stash);
     std::string store_block(void* buffer, bool write_file, uint64_t block_index, bool store_to_stash, std::string pre_computed_hash);
     bool is_multi_tiered();
-    std::pair<int,std::string> create_temporary_unique_block(char* name_template, uint64_t block_index, bool is_stash);
+    std::pair<int,std::string> create_temporary_unique_block(char* name_template, uint64_t block_index, bool on_stash);
 
     std::string base_directory;
     std::string stash_directory;
@@ -200,11 +203,14 @@ std::pair<int,std::string> block_storage::create_temporary_unique_block(char* na
     exit(-1);
   }
   // std::cout << "block_storage: block_granularity = " << block_granularity << std::endl;
+  #ifndef USE_COMPRESSION
+  std::cout << "USING COMPRESSION" << std::endl;
   int trunc_status = ftruncate(fd, block_granularity);
   if (trunc_status == -1){
     std::cerr << "Block Storage: Error sizing temporary file" << std::endl;
     exit(-1);
   }
+  #endif
   // std::cout << "Adding file with fd= " << fd << std::endl;
   /* if (block_fd_temp_name.find(fd) == block_fd_temp_name.end()){
     block_fd_temp_name.insert(std::pair<int, std::string>(fd, std::string(temporary_file_name_template)));
@@ -256,12 +262,30 @@ std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_
   if (!utility::file_exists(final_filename.c_str())){
     // Write
     if (write_to_file){
+      #ifdef USE_COMPRESSION
+      std::cout << "USING COMPRESSION" << std::endl;
+      void* write_buffer;
+      size_t compressed_block_size = utility::compress(buffer, block_granularity, write_buffer);
+      int trunc_status = ftruncate(block_fd, compressed_block_size);
+      if (trunc_status == -1){
+        std::cerr << "Block Storage: Error sizing temporary file to compressed size" << std::endl;
+        exit(-1);
+      }
+      size_t written = pwrite(block_fd ,write_buffer, compressed_block_size, 0);
+      if (written == -1){
+        std::cerr << "block_storage: Error writing to file" << std::endl;
+        // store_block_mutex->unlock();
+        return "";
+      }
+      free(write_buffer);
+      #else
       size_t written = pwrite(block_fd ,buffer, block_granularity, 0);
       if (written == -1){
         std::cerr << "block_storage: Error writing to file" << std::endl;
         // store_block_mutex->unlock();
         return "";
       }
+      #endif
     }
     // Rename
     // std::cout << "temporary_filename = " << temporary_filename << std::endl;
@@ -501,17 +525,20 @@ std::string block_storage::get_blocks_path(){
 }
 
 bool block_storage::is_multi_tiered(){
-  std::cout << "BASE_DIRECTORY: " << base_directory << std::endl;
-  std::cout << "STASH DIRECTORY: " << stash_directory << std::endl;
+  // std::cout << "BASE_DIRECTORY: " << base_directory << std::endl;
+  // std::cout << "STASH DIRECTORY: " << stash_directory << std::endl;
   size_t base_suffix_start = base_directory.find_last_of("/");
   size_t stash_suffix_start = stash_directory.find_last_of("/");
   std::string base_prefix = base_directory.substr(0, base_suffix_start);
   std::string stash_prefix = stash_directory.substr(0, stash_suffix_start);
-  std::cout << "BASE_PREFIX: " << base_prefix << std::endl;
-  std::cout << "STASH_PREFIX: " << stash_prefix << std::endl;
+  // std::cout << "BASE_PREFIX: " << base_prefix << std::endl;
+  // std::cout << "STASH_PREFIX: " << stash_prefix << std::endl;
   return (base_prefix.compare(stash_prefix) != 0);
 }
 
 bool block_storage::copy_to_stash(std::string base_block, std::string stash_block){
-  return utility::copy_file(base_block.c_str(), stash_block.c_str(), false);
+  if(!utility::file_exists(stash_block.c_str())){
+    return utility::copy_file(base_block.c_str(), stash_block.c_str(), false);
+  }
+  return true;
 }
