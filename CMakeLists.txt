@@ -11,7 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set (CMAKE_C_STANDARD 17)
 
-cmake_policy(SET CMP0074 NEW)
+# cmake_policy(SET CMP0074 NEW)
 
 set( default_build_type "Release" )
 if ( EXISTS "${CMAKE_SOURCE_DIR}/.git" )
@@ -91,12 +91,13 @@ TARGET_LINK_LIBRARIES(privateer-static stdc++fs)
 # ZSTD
 # ------------------ZSTD----------------------------
 if (ZSTD_ROOT)
-find_library(LIBZSTD NAMES zstd PATHS ${ZSTD_ROOT}/lib)
-target_include_directories(privateer PRIVATE ${ZSTD_ROOT}/lib)
-target_link_libraries(privateer ${LIBZSTD})
-target_include_directories(privateer-static PRIVATE ${ZSTD_ROOT}/lib)
-target_link_libraries(privateer-static ${LIBZSTD})
-add_compile_definitions(USE_COMPRESSION)
+  find_library(LIBZSTD NAMES zstd PATHS ${ZSTD_ROOT}/lib)
+  target_include_directories(privateer PRIVATE ${ZSTD_ROOT}/lib)
+  target_link_libraries(privateer ${LIBZSTD})
+  target_include_directories(privateer-static PRIVATE ${ZSTD_ROOT}/lib)
+  target_link_libraries(privateer-static ${LIBZSTD})
+  target_compile_definitions(privateer PRIVATE USE_COMPRESSION)
+  target_compile_definitions(privateer-static PRIVATE USE_COMPRESSION)
 endif()
 # --------------------------------------------------
 

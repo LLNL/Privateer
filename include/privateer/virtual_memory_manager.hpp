@@ -326,12 +326,12 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       #ifdef USE_COMPRESSION
       std::cout << "USING COMPRESSION" << std::endl;
       size_t compressed_block_size = utility::get_file_size(backing_block_path.c_str());
-      void* read_buffer = malloc(compressed_block_size);
-      if (pread(backing_block_fd, read_buffer, m_block_size, 0) == -1){
+      void* const read_buffer = malloc(compressed_block_size);
+      if (pread(backing_block_fd, read_buffer, compressed_block_size, 0) == -1){
         std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
         exit(-1);
       }
-      size_t decompressed_size = utility::decompress(read_buffer, temp_buffer);
+      size_t decompressed_size = utility::decompress(read_buffer, temp_buffer, compressed_block_size);
       free(read_buffer);
       #else
       if (pread(backing_block_fd, temp_buffer, m_block_size, 0) == -1){

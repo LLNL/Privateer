@@ -12,27 +12,25 @@
 #include <boost/iostreams/filter/zstd.hpp> */
 
 namespace utility{
-    size_t compress(void* input_buffer, size_t input_buffer_size, void* output_buffer){
-        std::cout << "COMPRESSINIG" << std::endl;
+    std::pair<void*,size_t> compress(void* input_buffer, size_t input_buffer_size){
+        std::cout << "COMPRESSING" << std::endl;
         size_t output_buffer_size_bound = ZSTD_compressBound(input_buffer_size);
+        void* const output_buffer = malloc(output_buffer_size_bound);
+        std::cout << "output_buffer_size_bound: " << output_buffer_size_bound << std::endl;
+        std::cout << "output_buffer before compression: " << (uint64_t) output_buffer << std::endl;
         size_t output_size = ZSTD_compress(output_buffer, output_buffer_size_bound, input_buffer, input_buffer_size, 1);
+        std::cout << "output_buffer after compression: " << (uint64_t) output_buffer << std::endl;
+        std::cout << "output_size: " << output_size << std::endl;
         if (ZSTD_isError(output_size)){
             std::cerr << "Compression Error: - " << ZSTD_getErrorName(output_size) << std::endl;
-            return -1;
+            exit(-1);
         }
-        return output_size;
+        return std::pair<void*,size_t>(output_buffer,output_size);
     }
 
-    size_t decompress(void* input_buffer, void* output_buffer){
+    size_t decompress(void* input_buffer, void* output_buffer, size_t compressed_size){
         std::cout << "DECOMPRESSING" << std::endl;
-        size_t compressed_size;
-        // void* const compressed_buffer = mallocAndLoadFile_orDie(file_name, &compressed_size);
-        /* Read the content size from the frame header. For simplicity we require
-        * that it is always present. By default, zstd will write the content size
-        * in the header when it is known. If you can't guarantee that the frame
-        * content size is always written into the header, either use streaming
-        * decompression, or ZSTD_decompressBound().
-        */
+        
         uint64_t rSize = ZSTD_getFrameContentSize(input_buffer, compressed_size);
         if (rSize == ZSTD_CONTENTSIZE_ERROR){
             std::cerr << "Decompression Error: File was not compressed by ZSTD" << std::endl;
@@ -45,11 +43,12 @@ namespace utility{
         }
         
 
-        size_t const output_size = ZSTD_decompress(output_buffer, rSize, input_buffer, compressed_size);
-        if (ZSTD_isError(output_size)){
-            std::cerr << "Decompression Error: - " << ZSTD_getErrorName(output_size) << std::endl;
+        return ZSTD_decompress(output_buffer, rSize, input_buffer, compressed_size);
+        /* int error = ZSTD_isError(output_size);
+        if (error > 0){
+            std::cerr << "Decompression Error: - " << ZSTD_getErrorName(error) << std::endl;
             return -1;
-        }
+        } */
         
 
         // free(compressed_buffer);

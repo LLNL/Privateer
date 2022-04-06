@@ -204,7 +204,7 @@ std::pair<int,std::string> block_storage::create_temporary_unique_block(char* na
   }
   // std::cout << "block_storage: block_granularity = " << block_granularity << std::endl;
   #ifndef USE_COMPRESSION
-  std::cout << "USING COMPRESSION" << std::endl;
+  std::cout << "NOT USING COMPRESSION" << std::endl;
   int trunc_status = ftruncate(fd, block_granularity);
   if (trunc_status == -1){
     std::cerr << "Block Storage: Error sizing temporary file" << std::endl;
@@ -264,8 +264,11 @@ std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_
     if (write_to_file){
       #ifdef USE_COMPRESSION
       std::cout << "USING COMPRESSION" << std::endl;
-      void* write_buffer;
-      size_t compressed_block_size = utility::compress(buffer, block_granularity, write_buffer);
+      std::pair<void*,size_t> compressed_buffer_and_size = utility::compress(buffer, block_granularity);
+      void* const write_buffer = compressed_buffer_and_size.first;
+      size_t compressed_block_size = compressed_buffer_and_size.second;
+      std::cout << "compressed_block_size: " << compressed_block_size << std::endl;
+      std::cout << "block_granularity: " << block_granularity << std::endl;
       int trunc_status = ftruncate(block_fd, compressed_block_size);
       if (trunc_status == -1){
         std::cerr << "Block Storage: Error sizing temporary file to compressed size" << std::endl;
@@ -273,7 +276,7 @@ std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_
       }
       size_t written = pwrite(block_fd ,write_buffer, compressed_block_size, 0);
       if (written == -1){
-        std::cerr << "block_storage: Error writing to file" << std::endl;
+        std::cerr << "block_storage: Error writing to file - " << strerror(errno) << std::endl;
         // store_block_mutex->unlock();
         return "";
       }
@@ -281,7 +284,7 @@ std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_
       #else
       size_t written = pwrite(block_fd ,buffer, block_granularity, 0);
       if (written == -1){
-        std::cerr << "block_storage: Error writing to file" << std::endl;
+        std::cerr << "block_storage: Error writing to file - " << strerror(errno) << std::endl;
         // store_block_mutex->unlock();
         return "";
       }
