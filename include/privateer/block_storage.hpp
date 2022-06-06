@@ -202,9 +202,10 @@ std::pair<int,std::string> block_storage::create_temporary_unique_block(char* na
     std::cerr << "block_storage: Error creating temporary file" << strerror(errno) << std::endl;
     exit(-1);
   }
+  // unlink(temporary_file_name_template);
   // std::cout << "block_storage: block_granularity = " << block_granularity << std::endl;
   #ifndef USE_COMPRESSION
-  std::cout << "NOT USING COMPRESSION" << std::endl;
+  // std::cout << "NOT USING COMPRESSION" << std::endl;
   int trunc_status = ftruncate(fd, block_granularity);
   if (trunc_status == -1){
     std::cerr << "Block Storage: Error sizing temporary file" << std::endl;
@@ -246,6 +247,8 @@ std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_
   char* name_template = (char*) temporary_file_name_template.c_str();
   std::pair<int, std::string> temp_file_fd_name = create_temporary_unique_block(name_template, block_index, on_stash);
   int block_fd = temp_file_fd_name.first;
+  
+  // std::cout << "BLOCK FD: " << block_fd << " Process ID: " << getpid() << std::endl;
 
   std::string subdirectory_name = get_blocks_subdirectory(block_index, on_stash);
   std::string block_hash = pre_computed_hash;
@@ -263,12 +266,12 @@ std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_
     // Write
     if (write_to_file){
       #ifdef USE_COMPRESSION
-      std::cout << "USING COMPRESSION" << std::endl;
+      // std::cout << "USING COMPRESSION" << std::endl;
       std::pair<void*,size_t> compressed_buffer_and_size = utility::compress(buffer, block_granularity);
       void* const write_buffer = compressed_buffer_and_size.first;
       size_t compressed_block_size = compressed_buffer_and_size.second;
-      std::cout << "compressed_block_size: " << compressed_block_size << std::endl;
-      std::cout << "block_granularity: " << block_granularity << std::endl;
+      /* std::cout << "compressed_block_size: " << compressed_block_size << std::endl;
+      std::cout << "block_granularity: " << block_granularity << std::endl;*/
       int trunc_status = ftruncate(block_fd, compressed_block_size);
       if (trunc_status == -1){
         std::cerr << "Block Storage: Error sizing temporary file to compressed size" << std::endl;

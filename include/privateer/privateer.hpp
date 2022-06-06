@@ -76,9 +76,14 @@ Privateer::Privateer(int action, const char* base_path){
     exit(-1);
   }
   if (action == CREATE){
-    if (utility::directory_exists(base_path)){
-      std::cerr << "Privateer: Error creating datastore - base directory already exists, action must be PRIVATEER::OPEN" << std::endl;
-      exit(-1);
+    if (utility::directory_exists(base_path)){ // Do nothing, use existing
+      /* std::cerr << "Privateer: Error creating datastore - base directory already exists, action must be PRIVATEER::OPEN" << std::endl;
+      exit(-1); */
+      std::cerr << "Using existing Privateer root dir at: " << base_path << std::endl;
+      base_dir_path = std::string(base_path);
+      blocks_dir_path = std::string(base_path) + "/" + "blocks";
+      stash_dir_path = std::string(base_path) + "/" + "stash";
+      return;
     }
     if (!utility::create_directory(base_path)){
       std::cerr << "Privateer: Error creating base directory at: " << base_path << " - " << strerror(errno) << std::endl;
@@ -102,7 +107,7 @@ Privateer::Privateer(int action, const char* base_path, const char* stash_base_p
     exit(-1);
   }
   if (action == CREATE){
-    std::cout << "ACTION IS CREATE" << std::endl;
+    // std::cout << "ACTION IS CREATE" << std::endl;
     if (utility::directory_exists(base_path)){
       std::cerr << "Privateer: Error creating datastore - base directory already exists, action must be PRIVATEER::OPEN" << std::endl;
       exit(-1);
@@ -116,10 +121,9 @@ Privateer::Privateer(int action, const char* base_path, const char* stash_base_p
       std::cerr << "Privateer: Error creating stash directory at: " << stash_base_path << " - " << strerror(errno) << std::endl;
       exit(-1);
     } */
-    
   }
   if (!utility::directory_exists(stash_base_path)){
-    std::cout << "CREATING STASH DIR AT: " << stash_base_path << std::endl;
+    // std::cout << "CREATING STASH DIR AT: " << stash_base_path << std::endl;
     if (!utility::create_directory(stash_base_path)){
       std::cerr << "Privateer: Error creating stash directory at: " << stash_base_path << " - " << strerror(errno) << std::endl;
       exit(-1);
@@ -138,7 +142,6 @@ Privateer::Privateer(int action, const char* base_path, const char* stash_base_p
 }
 
 void* Privateer::create(void *addr,const char *version_metadata_path, size_t region_size, bool allow_overwrite){
-  
   std::string version_metadata_full_path = base_dir_path + "/" + version_metadata_path;
   vmm = new virtual_memory_manager(addr, region_size, version_metadata_full_path, blocks_dir_path, stash_dir_path, allow_overwrite);
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
@@ -207,18 +210,14 @@ void* Privateer::open_immutable(void *addr, const char *version_metadata_path, c
 }
 
 void* Privateer::open(void* addr, const char *version_metadata_path, bool read_only){
-  // std::cout << "HELLO FROM PRIVATEER OPEN 1" << std::endl;
-  // std::cout << "the path: " << version_metadata_path << std::endl;
+
   std::string version_metadata_full_path = base_dir_path + "/" + std::string(version_metadata_path);
-  // std::cout << "HELLO FROM PRIVATEER OPEN 1.5" << std::endl;
-  // Check if datastore exist
   if(!utility::directory_exists(version_metadata_full_path.c_str())){
     std::cerr << "Error: Directory " << version_metadata_full_path << " does not exists" << std::endl;
     exit(-1);
   }
   // std::cout << "HELLO FROM PRIVATEER OPEN 2" << std::endl;
   version_metadata_dir_path = version_metadata_full_path;
-
   vmm = new virtual_memory_manager(addr, version_metadata_dir_path, stash_dir_path, read_only);
   // std::cout << "HELLO FROM PRIVATEER OPEN 3" << std::endl;
   utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
@@ -244,11 +243,14 @@ bool Privateer::snapshot(const char* version_metadata_path){
 }
 
 bool Privateer::version_exists(const char* version_metadata_path){
-  return utility::directory_exists(version_metadata_path);
+  std::string version_full_path = base_dir_path + "/" + version_metadata_path;
+  return utility::directory_exists(version_full_path.c_str());
 }
 
 inline Privateer::~Privateer()
 {
+  // std::cout << "compression_calls: " << utility::compression_calls << std::endl;
+  // std::cout << "decompression_call: " << utility::decompression_calls << std::endl;
   // std::cout << "ByeBye Privateer" << std::endl;
   struct sigaction sa;
   sa.sa_flags = SA_RESETHAND;

@@ -104,7 +104,7 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
       exit(-1);
     }
     else{
-      std::cout << "WARNING: region capacity less than block size, setting block size to region capacity" << std::endl;
+      // std::cout << "WARNING: region capacity less than block size, setting block size to region capacity" << std::endl;
       m_block_size = region_max_capacity;
     }
   }
@@ -146,6 +146,13 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   }
   // std::cout << "DEBUG: after init blocks_ids" << std::endl;
   
+  struct stat st_dev_null;
+  if (fstat(0,&st_dev_null) != 0){
+    // std::cout << "Opening /dev/null" << std::endl;
+    int dev_null_fd = ::open("/dev/null",O_RDWR);
+    // std::cout << "/dev/null FD: " << dev_null_fd << std::endl;
+  }
+
   m_read_only = false;
 
 }
@@ -166,7 +173,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   if (!std::getline(blocks_path_file, blocks_dir_path)){
     std::cerr << "Error reading blocks path file" << std::endl;
   } 
-  
+  // std::cout << "blocks_dir_path = "<< blocks_dir_path << std::endl;
   m_block_storage = new block_storage(blocks_dir_path, stash_path);
   m_block_size = m_block_storage->get_block_granularity();
   
@@ -209,13 +216,16 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   // std::cout << "Privateer: Metadata size = " << metadata_size  << std::endl;
   for (size_t i = 0; i < metadata_size; i += HASH_SIZE){
     // std::cout << "Privateer: Initializing blocks and regions, iteration no. " << i << std::endl;
-    
+    // std::cout << "blocks_ids_index: " << (i / HASH_SIZE) << std::endl;
     std::string block_hash(all_hashes, i, HASH_SIZE);
-    
     blocks_ids[i / HASH_SIZE] = block_hash;
-    
   }
   
+  size_t num_occupied_blocks = metadata_size / HASH_SIZE;
+  for (size_t i = num_occupied_blocks; i < num_blocks; i++){
+    // std::cout << "blocks_ids_index Next: " << i << std::endl;
+    blocks_ids[i] = EMPTY_BLOCK_HASH;
+  }
   
   delete [] metadata_content;
   
@@ -227,6 +237,12 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   m_max_mem_size = max_mem_size_blocks * m_block_size;
   // std::cout << "RETURNING FROM CONSTRUCTOR" << std::endl;
   // std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
+  struct stat st_dev_null;
+  if (fstat(0,&st_dev_null) != 0){
+    // std::cout << "Opening /dev/null" << std::endl;
+    int dev_null_fd = ::open("/dev/null",O_RDWR);
+    // std::cout << "/dev/null FD: " << dev_null_fd << std::endl;
+  }
   
 }
 
@@ -299,6 +315,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       boost::uuids::uuid uuid = boost::uuids::random_generator()();
       const std::string block_name = boost::lexical_cast<std::string>(uuid);
       int shm_fd = shm_open(block_name.c_str(), O_CREAT | O_RDWR, S_IWUSR);
+      // std::cout << "shm_fd: " << shm_fd << std::endl;
       if (shm_fd == -1){
         std::cerr << "Error shm_open: " << strerror(errno) << std::endl;
       }
@@ -324,7 +341,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
         exit(-1);
       }
       #ifdef USE_COMPRESSION
-      std::cout << "USING COMPRESSION" << std::endl;
+      // std::cout << "USING COMPRESSION DECOMPRESSING" << std::endl;
       size_t compressed_block_size = utility::get_file_size(backing_block_path.c_str());
       void* const read_buffer = malloc(compressed_block_size);
       if (pread(backing_block_fd, read_buffer, compressed_block_size, 0) == -1){
@@ -334,6 +351,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       size_t decompressed_size = utility::decompress(read_buffer, temp_buffer, compressed_block_size);
       free(read_buffer);
       #else
+      // std::cout << "NOT USING COMPRESSION" << std::endl;
       if (pread(backing_block_fd, temp_buffer, m_block_size, 0) == -1){
         std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
         exit(-1);
@@ -473,6 +491,12 @@ void virtual_memory_manager::msync(){
   }
   stash_set.clear();
   update_metadata();
+  struct stat st_dev_null;
+  if (fstat(0,&st_dev_null) != 0){
+    // std::cout << "Opening /dev/null" << std::endl;
+    int dev_null_fd = ::open("/dev/null",O_RDWR);
+    // std::cout << "/dev/null FD: " << dev_null_fd << std::endl;
+  }
 }
 
 // TODO: Redesign and Rewrite
@@ -527,7 +551,15 @@ bool virtual_memory_manager::snapshot(const char* version_metadata_path){
 }
 
 void virtual_memory_manager::update_metadata(){
-  size_t num_blocks = m_region_max_capacity / m_block_size;
+  // std::cout << "present_blocks.size(): " << present_blocks.size() << std::endl;
+  if (present_blocks.size() == 0){
+    return;
+  }
+  size_t max_address = *present_blocks.rbegin();
+  size_t current_size = max_address - (uint64_t) m_region_start_address + m_block_size;
+  size_t num_blocks = current_size / m_block_size; // m_region_max_capacity / m_block_size;
+  // std::cout << "update_metadata() current_size: " << current_size << std::endl;
+  // std::cout << "update_metadata() num_blocks:   " << num_blocks << std::endl;
   char* blocks_bytes = new char[num_blocks*HASH_SIZE];
   for (size_t i = 0 ; i < num_blocks ; i++){
     const char* block_hash_bytes = blocks_ids[i].c_str();

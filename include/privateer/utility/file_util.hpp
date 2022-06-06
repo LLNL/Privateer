@@ -11,7 +11,6 @@
 #include <filesystem>
 #include <sys/stat.h>
 
-
 namespace utility{
 
   namespace fs = std::filesystem;
