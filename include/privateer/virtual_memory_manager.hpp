@@ -84,20 +84,36 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
     std::cerr << "Error: start_address is not system-page aligned" << std::endl;
     exit(-1);
   }
-  // std::cout << "region_max_capacity: " << region_max_capacity << std::endl;
-  // Set block_size and verify multiple of system's page size
+  
+  // Set block_size
   m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
   if ( std::isnan(m_block_size) || m_block_size == 0){
-    // std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
-    m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
+    size_t num_blocks = utility::get_environment_variable("PRIVATEER_NUM_BLOCKS");
+    if (std::isnan(num_blocks) || num_blocks == 0){
+      std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
+      m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
+    }
+    else{
+      if (region_max_capacity % num_blocks == 0){
+        m_block_size = region_max_capacity / num_blocks;
+      }
+      else{
+        std::cerr << "PRIVATEER_NUM_BLOCKS is set, but region capacity is not divisible by it "<< std::endl;
+        exit(-1);
+      }
+    }
   }
+  // Verify multiple of system's page size
   if (m_block_size % pagesize != 0){
     std::cerr << "Error: block_size must be multiple of system page size (" << pagesize << ")" << std::endl;
     exit(-1);
   }
   // Verity region capacity is multiple of block size
   if (region_max_capacity % m_block_size != 0 && region_max_capacity != 0){
-    std::cerr << "region_max_capacity: " <<  region_max_capacity << std::endl;
+    // Round capacity to nearest larger multiple of block size
+    region_max_capacity = ((region_max_capacity / m_block_size) + 1) * m_block_size;
+
+    /* std::cerr << "region_max_capacity: " <<  region_max_capacity << std::endl;
     std::cerr << "m_block_size: " << m_block_size << std::endl;
     if (region_max_capacity > m_block_size){
       std::cerr << "Virtual Memory Manager: Error - region size must be a non-zero multiple of block size" << std::endl;
@@ -106,7 +122,7 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
     else{
       // std::cout << "WARNING: region capacity less than block size, setting block size to region capacity" << std::endl;
       m_block_size = region_max_capacity;
-    }
+    } */
   }
 
   size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
@@ -235,22 +251,18 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
   }
   m_max_mem_size = max_mem_size_blocks * m_block_size;
-  // std::cout << "RETURNING FROM CONSTRUCTOR" << std::endl;
-  // std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
+
+  // In some cases /dev/null file descriptorr was affected, temporary solution is check and re-open
   struct stat st_dev_null;
   if (fstat(0,&st_dev_null) != 0){
-    // std::cout << "Opening /dev/null" << std::endl;
     int dev_null_fd = ::open("/dev/null",O_RDWR);
-    // std::cout << "/dev/null FD: " << dev_null_fd << std::endl;
   }
   
 }
 
 void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr){
-  // std::cout << "THE HANDLER GOES HANDLING" << std::endl;
   const std::lock_guard<std::mutex> lock(sig_handler_mutex);
   // Get and assert faulting address
-  // std::cout << "STARTING HANDLING" << std::endl;
   uint64_t fault_address = (uint64_t) si->si_addr;
   uint64_t start_address = (uint64_t) m_region_start_address;
   if (fault_address < (uint64_t) start_address || fault_address >= (uint64_t) start_address + m_region_max_capacity){
