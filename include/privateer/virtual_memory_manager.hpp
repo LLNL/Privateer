@@ -322,7 +322,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     }
     
     if (!backing_block_path.empty()){ // Backing block exists
-      
+      #ifndef __linux__
       // shm_open
       boost::uuids::uuid uuid = boost::uuids::random_generator()();
       const std::string block_name = boost::lexical_cast<std::string>(uuid);
@@ -342,10 +342,14 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       }
       // mmap temporary location
       void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+      #else
+      void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      #endif
       if (temp_buffer == MAP_FAILED){
         std::cerr << "Error mmap temp: " << strerror(errno) << std::endl;
         exit(-1);
       }
+      
       // read block content into temporary buffer
       backing_block_fd = open(backing_block_path.c_str(), O_RDONLY);
       if (backing_block_fd == -1){
@@ -375,23 +379,35 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
         exit(-1);
       }
 
+      #ifndef __linux__
       // mmap original block
       void *mmap_block_address = mmap((void*) block_address, m_block_size, prot, MAP_PRIVATE | MAP_FIXED, shm_fd,0);
+      #else
+      if (mprotect(temp_buffer, m_block_size, prot) != 0){
+        std::cerr << "Error updating permissions on temporary buffer for block: " << block_address << std::endl;
+        exit(-1);
+      }
+      void *mmap_block_address = mremap(temp_buffer, m_block_size, m_block_size, MREMAP_FIXED | MREMAP_MAYMOVE, block_address);
+      #endif
       if (mmap_block_address == MAP_FAILED){
         std::cerr << "virtual_memory_manager: Error remapping address: " << block_address << std::endl;
         exit(-1);
       }
+
+      #ifndef __linux__
       // unmap temp buffer
       int munmap_status = munmap(temp_buffer, m_block_size);
       if (munmap_status == -1){
         std::cerr << "virtual_memory_manager: Error unmapping temp buffer: " << (uint64_t) temp_buffer << " for faulting block address: " << block_address << std::endl;
         exit(-1);
       }
+      
       // close shm_fd
       if (::close(shm_fd) == -1){
         std::cerr << "virtual_memory_manager: Error closing shm_fd: " << strerror(errno) << std::endl;
         exit(-1);
       }
+      #endif
       // unstash block
       if ((!stash_backing_block_path.empty()) && is_write_fault){
         // std::cout << "STASHED TO DIRTY: " << block_index << std::endl;
