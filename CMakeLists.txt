@@ -11,25 +11,22 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set (CMAKE_C_STANDARD 17)
 
+# cmake_policy(SET CMP0074 NEW)
+
 set( default_build_type "Release" )
 if ( EXISTS "${CMAKE_SOURCE_DIR}/.git" )
   set( default_build_type "Debug" )
 endif()
 
+
 FIND_PACKAGE(OpenSSL)
 
-option(USE_PAGEMAP_MSYNC ON)
+# option(USE_PAGEMAP_MSYNC ON)
 
-if (USE_PAGEMAP_MSYNC)
-  add_definitions(-DUSE_PAGEMAP)
-endif()
+# if (USE_PAGEMAP_MSYNC)
+#  add_definitions(-DUSE_PAGEMAP)
+# endif()
 
-# if (CRYPTOPP_ROOT)
-#  include_directories(${CRYPTOPP_ROOT})
-#  link_libraries(${CRYPTOPP_ROOT}/libcryptopp.a)
-# else ()
-#  message(FATAL_ERROR "Cryptopp850 (https://cryptopp.com/) is required to build Privateer")
-# endif ()
 
 # OpenSSL
 link_libraries(OpenSSL::SSL)
@@ -37,6 +34,7 @@ link_libraries(OpenSSL::Crypto)
 
 # File System
 link_libraries(stdc++fs)
+
 
 # ------------------OpenMP--------------------------
 FIND_PACKAGE( OpenMP REQUIRED )
@@ -54,7 +52,7 @@ endif()
 # ------------------ Boost -------------------------------------------------------------------------------
 set (Boost_NO_BOOST_CMAKE ON)
 
-find_package(Boost)
+find_package(Boost) # COMPONENTS iostreams) # REQUIRED COMPONENTS system iostreams)
 
 if (Boost_FOUND)
 
@@ -69,10 +67,57 @@ endif ()
 
 # ---------------------------------------------------------------------------------------------------------- 
 
-install(DIRECTORY include/privateer DESTINATION include)
 
 include_directories(include)
+include_directories(src)
 
-find_package(MPI)
+set(privateer_headers include/privateer/c_api/privateer.h include/privateer/privateer.hpp )
+set(privateer_src src/privateer_c.cpp ${privateer_headers})
 
-add_subdirectory(test_apps)
+add_library(privateer SHARED ${privateer_src} )
+add_library(privateer-static STATIC ${privateer_src} )
+
+TARGET_LINK_LIBRARIES(privateer rt)
+TARGET_LINK_LIBRARIES(privateer-static rt)
+TARGET_LINK_LIBRARIES(privateer OpenSSL::SSL)
+TARGET_LINK_LIBRARIES(privateer-static OpenSSL::SSL)
+TARGET_LINK_LIBRARIES(privateer OpenSSL::Crypto)
+TARGET_LINK_LIBRARIES(privateer-static OpenSSL::Crypto)
+
+# File System
+TARGET_LINK_LIBRARIES(privateer stdc++fs)
+TARGET_LINK_LIBRARIES(privateer-static stdc++fs)
+
+# ZSTD
+# ------------------ZSTD----------------------------
+if (ZSTD_ROOT)
+  find_library(LIBZSTD NAMES zstd PATHS ${ZSTD_ROOT}/lib)
+  target_include_directories(privateer PRIVATE ${ZSTD_ROOT}/lib)
+  target_link_libraries(privateer ${LIBZSTD})
+  target_include_directories(privateer-static PRIVATE ${ZSTD_ROOT}/lib)
+  target_link_libraries(privateer-static ${LIBZSTD})
+  target_compile_definitions(privateer PRIVATE USE_COMPRESSION)
+  target_compile_definitions(privateer-static PRIVATE USE_COMPRESSION)
+endif()
+# --------------------------------------------------
+
+
+# iostreams
+# TARGET_LINK_LIBRARIES(privateer boost_iostreams)
+# TARGET_LINK_LIBRARIES(privateer-static boost_iostreams)
+
+set_target_properties(privateer-static PROPERTIES OUTPUT_NAME privateer)
+
+install(TARGETS  privateer privateer-static # Removed "privateer" from here
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin )
+
+# install(FILES include/privateer/privateer.hpp DESTINATION include/privateer)
+# install(FILES include/privateer/c_api/privateer.h DESTINATION include/privateer/c_api)
+
+install(DIRECTORY include/privateer DESTINATION include)
+
+# find_package(MPI)
+
+# add_subdirectory(test_apps)

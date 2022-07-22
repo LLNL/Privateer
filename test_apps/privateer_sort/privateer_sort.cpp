@@ -37,16 +37,20 @@ int main(int argc, char** argv) {
   // multi_mmap_private mapper(std::string(fname), size_bytes);
   // size_t* the_ints = (size_t*)mapper.data();
   Privateer *priv;
+  std::string version_metadata_path = "version_0";
+  std::string new_version_metadata_path = "version_1";
+  size_t* the_ints;
   if(no_init == 0){
-    std::string blocks_dir_path = std::string(fname) + "_blocks";
-    priv = new Privateer(nullptr, blocks_dir_path.c_str(), fname, size_bytes, size_bytes);
+    // std::string blocks_dir_path = std::string(fname) + "_blocks";
+    priv = new Privateer(Privateer::CREATE, fname);
+    the_ints = (size_t*) priv->create(nullptr, version_metadata_path.c_str(), size_bytes);
   }
   else{
-    std::string new_version_metadata_path = std::string(fname) + "_2";
-    priv = new Privateer(fname, new_version_metadata_path.c_str());
+    priv = new Privateer(Privateer::OPEN, fname);
+    the_ints = (size_t*) priv->open_immutable(nullptr, version_metadata_path.c_str(), new_version_metadata_path.c_str());
   }
-  size_t* the_ints = (size_t*)priv->data();
-  size_t current_size = priv->current_size();
+  // size_t* the_ints = (size_t*)priv->data();
+  size_t current_size = size_bytes; // priv->current_size();
   size_t num_ints = size_bytes / sizeof(size_t); // Is this correct or should we add "get_size()" to privateer and use it here?
 
   std::cout << "Current size = " << current_size << std::endl;
@@ -63,12 +67,12 @@ int main(int argc, char** argv) {
       // the_ints[i] = i / chunk_size;
     }
     double init_end = omp_get_wtime();
-    std::cout << "Initialization done" << std::endl;
+    std::cout << "Initialization took: " << (init_end - init_start) << std::endl;
     std::cout << "msync..." << std::endl; 
     double init_msync_start = omp_get_wtime();
     priv->msync();
     double init_msync_end = omp_get_wtime();
-    std::cout << "msync done" << std::endl;
+    std::cout << "msync took: " << (init_msync_end - init_msync_start) << std::endl;
 
   }
 
@@ -81,8 +85,9 @@ int main(int argc, char** argv) {
   //
   // Sort
   double sort_start = omp_get_wtime();
-  __gnu_parallel::sort(the_ints, the_ints + num_ints, std::less<uint64_t>(),
-                       __gnu_parallel::quicksort_tag());
+  /* __gnu_parallel::sort(the_ints, the_ints + num_ints, std::less<uint64_t>(),
+                       __gnu_parallel::quicksort_tag()); */
+  std::sort(the_ints, the_ints + num_ints);
   double sort_end = omp_get_wtime();
   double sort_msync_start = omp_get_wtime();
   priv->msync();
@@ -95,18 +100,22 @@ int main(int argc, char** argv) {
   bool failed = false;
   //end temp
 
- // size_t chunk_size = 16777216;
-#pragma omp parallel for
+ size_t chunk_size = 4*1024*1024L;
+// #pragma omp parallel for
   for (size_t i = 0; i < num_ints; ++i) {
     /* if (i % chunk_size == 0){
       std::cout << "i: " << i << " the_ints[i]: " << the_ints[i] << std::endl;
     } */
+    
     if (the_ints[i] != i) {
-      std::cerr << "Failed to Validate" << std::endl;
+      std::cerr << "Failed to Validate " << i << " " << the_ints[i] << std::endl;
       exit(-1);
       // std::cout << "i: " << i << "the_ints[i]: " << the_ints[i] << std::endl;
       // failed = true;
     }
+    /* if (i % 1048576 == 0){
+      std::cout << "block: " << (i / 1048576) << " passed" << std::endl;
+    } */
   }
   // std::cout << "Failed: " << failed << std::endl;
   double validate_end = omp_get_wtime();

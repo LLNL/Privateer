@@ -11,7 +11,6 @@
 #include <filesystem>
 #include <sys/stat.h>
 
-
 namespace utility{
 
   namespace fs = std::filesystem;
@@ -23,7 +22,7 @@ namespace utility{
         return true;
       }
       else{
-        std::cerr << "Privateer: Error creating directory: " << ec.message() << std::endl;
+        std::cerr << "Privateer: Error creating directory: " << dir_path << " - " << ec.message() << std::endl;
         return false;
       }
     }
@@ -52,6 +51,10 @@ namespace utility{
       return false;
     }
     return true;
+  }
+
+  size_t get_file_size(const char* file_path){
+    return fs::file_size(std::string(file_path));
   }
 
 }

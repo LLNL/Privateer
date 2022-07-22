@@ -13,6 +13,7 @@ if(OPENMP_FOUND)
   set(CMAKE_EXE_LINKER_FLAGS
     "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
   add_executable(snapshot_basic_test snapshot_basic_test.cpp)
+  TARGET_LINK_LIBRARIES(snapshot_basic_test rt)
 else()
   message("Skipping snapshot_basic_test, OpenMP required")
 endif()
