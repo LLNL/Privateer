@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #include <cerrno>
 #include <atomic>
+#include <string>
 
 
 #include <boost/uuid/uuid.hpp>
@@ -55,10 +56,10 @@ class block_storage
   private:
     void create(std::string base_directory, std::string stash_directory, size_t block_granularity);
     void open(std::string base_directory, std::string stash_directory);
-    std::string get_blocks_subdirectory(uint64_t block_index, bool on_stash);
+    std::string get_blocks_subdirectory(std::string block_hash, bool on_stash);
     std::string store_block(void* buffer, bool write_file, uint64_t block_index, bool store_to_stash, std::string pre_computed_hash);
     bool is_multi_tiered();
-    std::pair<int,std::string> create_temporary_unique_block(char* name_template, uint64_t block_index, bool on_stash);
+    std::pair<int,std::string> create_temporary_unique_block(std::string prefix, char* name_template, uint64_t block_index, bool on_stash);
 
     std::string base_directory;
     std::string stash_directory;
@@ -71,7 +72,8 @@ class block_storage
     // std::mutex * store_block_mutex;
     // bip::named_mutex *store_block_mutex; // (bip::open_or_create, "store_block_mutex");
     std::mutex create_block_directory_mutex;
-    size_t files_per_subdirectory = 1024;
+    size_t num_subdirs = 1024;
+    size_t hash_prefix_length = 6;
     // std::atomic<size_t> num_files = 0;
 };
 
@@ -190,10 +192,10 @@ void block_storage::open(std::string base_directory_path, std::string stash_dire
   // std::cout << "block_storage: Base directory path = " << base_directory << std::endl;
 }
 
-std::pair<int,std::string> block_storage::create_temporary_unique_block(char* name_template, uint64_t block_index, bool on_stash){
+std::pair<int,std::string> block_storage::create_temporary_unique_block(std::string prefix, char* name_template, uint64_t block_index, bool on_stash){
   // std::lock_guard<std::mutex> store_lock(store_block_mutex);
-  std::string subdirectory_name = get_blocks_subdirectory(block_index, on_stash);
-  std::string temporary_file_name = subdirectory_name + "/" + std::string(name_template);
+  // std::string subdirectory_name = get_blocks_subdirectory(block_index, on_stash);
+  std::string temporary_file_name = prefix + "/" + std::string(name_template);
   char* temporary_file_name_template = new char[temporary_file_name.length() + 1];
   temporary_file_name_template = (char*) memcpy((void*) temporary_file_name_template, (void*) temporary_file_name.c_str(), temporary_file_name.length() + 1);
   // std::cout << "block_storage: temporary_file_name_template =" << temporary_file_name_template << std::endl;
@@ -243,19 +245,21 @@ std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_
 }
 
 std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_t block_index, bool on_stash, std::string pre_computed_hash){
-  std::string temporary_file_name_template = std::to_string(block_index) + "_temp_XXXXXX";
-  char* name_template = (char*) temporary_file_name_template.c_str();
-  std::pair<int, std::string> temp_file_fd_name = create_temporary_unique_block(name_template, block_index, on_stash);
-  int block_fd = temp_file_fd_name.first;
+  
   
   // std::cout << "BLOCK FD: " << block_fd << " Process ID: " << getpid() << std::endl;
 
-  std::string subdirectory_name = get_blocks_subdirectory(block_index, on_stash);
   std::string block_hash = pre_computed_hash;
   if (block_hash.empty()){
     block_hash = utility::compute_hash((char*) buffer, block_granularity);
   }
 
+  std::string subdirectory_name = get_blocks_subdirectory(block_hash, on_stash);
+
+  std::string temporary_file_name_template = std::to_string(block_index) + "_temp_XXXXXX";
+  char* name_template = (char*) temporary_file_name_template.c_str();
+  std::pair<int, std::string> temp_file_fd_name = create_temporary_unique_block(subdirectory_name, name_template, block_index, on_stash);
+  int block_fd = temp_file_fd_name.first;
   // std::cout << "block_storage: store_block() base_directory = " << base_directory << std::endl;
   // std::cout << "block_storage: store_block() std::string(base_directory) returns  " << std::string(base_directory) << std::endl;
 
@@ -313,6 +317,7 @@ std::string block_storage::store_block(void* buffer, bool write_to_file, uint64_
       else{
         std::cerr << "block_storage: Error renaming file " << strerror(errno) << std::endl;
         std::cerr << "Temporary file name = " << temporary_filename << std::endl;
+        std::cerr << "Final file name = " << final_filename << std::endl;
       }
       if (::close(block_fd) == -1){
         std::cerr << "virtual_memory_manager: Error closing file descriptor for block: " << block_index << " - " << strerror(errno) << std::endl;
@@ -420,7 +425,7 @@ std::string block_storage::commit_stash_block(uint64_t block_index){
   // Get block subdirectory
   std::string subdirectory_name;
   bool is_stash = is_multi_tiered();
-  subdirectory_name = get_blocks_subdirectory(block_index, is_stash);
+  subdirectory_name = get_blocks_subdirectory(block_hash, is_stash);
   // Rename block
   std::string final_filename = subdirectory_name + "/" + block_hash;
   std::string stash_filename = stash_directory + "/" + stash_block_ids[block_index];
@@ -485,9 +490,9 @@ size_t block_storage::get_block_granularity(){
 
 // Copies block to stash if not there
 std::string block_storage::get_block_full_path(uint64_t block_index, std::string block_hash){
-  std::string base_subdir = get_blocks_subdirectory(block_index, false);
+  std::string base_subdir = get_blocks_subdirectory(block_hash, false);
   if (is_multi_tiered()){
-    std::string stash_subdir =  get_blocks_subdirectory(block_index, true);
+    std::string stash_subdir =  get_blocks_subdirectory(block_hash, true);
     if (stash_committed_block_ids.find(block_index) == stash_committed_block_ids.end()){
       std::string stash_block_path = stash_subdir + "/" + block_hash;
       std::string base_block_path = base_subdir + "/" + block_hash;
@@ -504,9 +509,11 @@ std::string block_storage::get_block_full_path(uint64_t block_index, std::string
   } 
 }
 
-std::string block_storage::get_blocks_subdirectory(uint64_t block_index, bool on_stash){
+std::string block_storage::get_blocks_subdirectory(std::string block_hash, bool on_stash){
   std::string base_path = on_stash ? stash_directory : base_directory;
-  size_t subdir_index = block_index / files_per_subdirectory;
+  std::string block_hash_prefix = "0x" + block_hash.substr(0,hash_prefix_length);
+  size_t block_prefix_index = std::stoul(block_hash_prefix, nullptr, 16);
+  size_t subdir_index = block_prefix_index % num_subdirs;
   std::string subdir_name = base_path + "/" + std::to_string(subdir_index);
   if (!utility::directory_exists(subdir_name.c_str())){
     if (!utility::create_directory(subdir_name.c_str())){

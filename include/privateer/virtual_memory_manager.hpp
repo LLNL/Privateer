@@ -21,6 +21,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <thread>
 #include <mutex>
+#include <omp.h>
 
 #include "block_storage.hpp"
 
@@ -62,6 +63,8 @@ class virtual_memory_manager {
 
     block_storage *m_block_storage;
 
+    // std::mutex* blocks_locks;
+    // size_t num_locks = 2048;
     std::mutex sig_handler_mutex;
 
     void evict_if_needed();
@@ -90,7 +93,7 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   if ( std::isnan(m_block_size) || m_block_size == 0){
     size_t num_blocks = utility::get_environment_variable("PRIVATEER_NUM_BLOCKS");
     if (std::isnan(num_blocks) || num_blocks == 0){
-      std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
+      // std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
       m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
     }
     else{
@@ -156,6 +159,7 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   size_t num_blocks = m_region_max_capacity / m_block_size;
   // std::cout << "num_blocks: " << num_blocks << std::endl;
   blocks_ids = new std::string[num_blocks];
+  // blocks_locks = new std::mutex[num_blocks];
   // std::cout << "DEBUG: before init blocks_ids" << std::endl;
   for (size_t i = 0 ; i < num_blocks ; i++){
     blocks_ids[i] = EMPTY_BLOCK_HASH;
@@ -242,6 +246,8 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     // std::cout << "blocks_ids_index Next: " << i << std::endl;
     blocks_ids[i] = EMPTY_BLOCK_HASH;
   }
+
+  // blocks_locks = new std::mutex[num_blocks];
   
   delete [] metadata_content;
   
@@ -265,6 +271,11 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
   // Get and assert faulting address
   uint64_t fault_address = (uint64_t) si->si_addr;
   uint64_t start_address = (uint64_t) m_region_start_address;
+  uint64_t block_index = (fault_address - start_address) / m_block_size;
+  uint64_t block_address = start_address + block_index * m_block_size;
+  // std::cout << "thread: " << omp_get_thread_num() << " Faulted on block: " << (block_index % num_locks) << std::endl;
+  // const std::lock_guard<std::mutex> lock(blocks_locks[block_index]); // lock(blocks_locks[block_index % num_locks]);
+  // std::cout << "thread: " << omp_get_thread_num() << " grabbed lock number: " << (block_index % num_locks) << std::endl;
   if (fault_address < (uint64_t) start_address || fault_address >= (uint64_t) start_address + m_region_max_capacity){
     std::cerr << "Error: Faulting address out of range" << std::endl;
     std::cerr << "Faulting Address: " << (uint64_t) fault_address << std::endl;
@@ -275,10 +286,10 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
   
   // Handle block fault
   ucontext_t *ctx = (ucontext_t *) ctx_void_ptr;
-  uint64_t block_index = (fault_address - start_address) / m_block_size;
-  uint64_t block_address = start_address + block_index * m_block_size;
   bool is_write_fault = ctx->uc_mcontext.gregs[REG_ERR] & 0x2;
   
+  
+  std::cout << "HANDLING" << std::endl;
   if (present_blocks.find((uint64_t) block_address) != present_blocks.end()){ // Block is present in-memory (just change prot and LRU if needed)
     
     if (is_write_fault){
@@ -343,6 +354,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
       // mmap temporary location
       void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
       #else
+      // std::cout << "On Linux, using mremap" << std::endl;
       void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
       #endif
       if (temp_buffer == MAP_FAILED){
@@ -433,12 +445,13 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     }
     present_blocks.insert((uint64_t)block_address);
   }
-  // std::cout << "ENDING HANDLING" << std::endl;
+  std::cout << "DONE HANDLER" << std::endl;
 }
 
 void virtual_memory_manager::evict_if_needed(){
   void* to_evict;
   if ((present_blocks.size()*m_block_size) >= m_max_mem_size){
+    // std::cout << "EVICTING" << std::endl;
     if (clean_lru.size() > 0){
       to_evict = (void*) clean_lru.back();
       // std::cout << "Evicting clean block: " << ((uint64_t) to_evict - (uint64_t) m_region_start_address) / m_block_size << std::endl;
@@ -467,7 +480,6 @@ void virtual_memory_manager::evict_if_needed(){
 }
 
 void virtual_memory_manager::msync(){
-  
   // 1) Write dirty_lru
   // std::cout << "size of dirty LRU: "<< dirty_lru.size() << std::endl;
   std::vector<uint64_t> dirty_lru_vector(dirty_lru.begin(), dirty_lru.end());
@@ -529,6 +541,7 @@ void virtual_memory_manager::msync(){
 
 // TODO: Redesign and Rewrite
 bool virtual_memory_manager::snapshot(const char* version_metadata_path){
+  // std::cout << "Snapshot path: " << version_metadata_path  << std::endl;
   // Create new version metadata directory
   if(utility::directory_exists(version_metadata_path)){
     std::cerr << "Error: Version metadata directory already exists" << std::endl;
@@ -710,6 +723,7 @@ int virtual_memory_manager::close(){
       }
   }
   delete [] blocks_ids;
+  // delete [] blocks_locks;
   delete m_block_storage;
   m_region_start_address = nullptr;
   return 0;
