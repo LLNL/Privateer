@@ -43,7 +43,9 @@ class virtual_memory_manager {
     virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only);
     ~virtual_memory_manager();
     void msync();
-    void* handler(void *uffd_arg);
+    void* handler();
+    static void* handler_helper(void* context);
+    void set_uffd(uint64_t uffd);
     void* get_region_start_address();
     size_t static version_capacity(std::string version_path);
     size_t current_region_capacity();
@@ -302,21 +304,22 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   }
 }
 
-void * virtual_memory_manager::handler(void *uffd_arg){
+void virtual_memory_manager::set_uffd(uint64_t uffd){
+  m_uffd = uffd;
+}
+
+void * virtual_memory_manager::handler(){
   std::cout << "Beginning of handler" << std::endl;
   // START: UFFD variables
   static struct uffd_msg msg;   /* Data read from userfaultfd */
   static int fault_cnt = 0;     /* Number of faults so far handled */
-  long uffd;                    /* userfaultfd file descriptor */
   /* struct uffdio_copy uffdio_copy;
   struct uffdio_zeropage uffdio_zeropage; */
   ssize_t nread;
   
-  uffd = (long) uffd_arg;
-  m_uffd = uffd;
   // Get UFFD information
     struct pollfd pollfd[3] = {
-        { .fd = uffd, .events = POLLIN }
+        { .fd = m_uffd, .events = POLLIN }
       , { .fd = uffd_pipe[0], .events = POLLIN }
       , { .fd = uffd_pipe[1], .events = POLLIN }
     };
@@ -340,7 +343,7 @@ void * virtual_memory_manager::handler(void *uffd_arg){
       break;
     }
 
-    nread = read(uffd, &msg, sizeof(msg));
+    nread = read(m_uffd, &msg, sizeof(msg));
     if (nread == 0) {
         std::cerr << "EOF on userfaultfd!" << std::endl;
         exit(EXIT_FAILURE);
@@ -399,7 +402,7 @@ void * virtual_memory_manager::handler(void *uffd_arg){
       uffdio_writeprotect.range.start = block_address;
       uffdio_writeprotect.range.len = m_block_size;
       uffdio_writeprotect.mode = 0; // UFFDIO_WRITEPROTECT_MODE_DONTWAKE;
-      if (ioctl(uffd, UFFDIO_WRITEPROTECT, &uffdio_writeprotect) == -1){
+      if (ioctl(m_uffd, UFFDIO_WRITEPROTECT, &uffdio_writeprotect) == -1){
           std::cerr << "Error ioctl-UFFDIO_WRITEPROTECT" << strerror(errno) << std::endl;
           exit(-1);
       }
@@ -472,7 +475,7 @@ void * virtual_memory_manager::handler(void *uffd_arg){
           uffdio_copy.len = m_block_size;
           uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
           uffdio_copy.copy = 0;
-          if (ioctl(uffd, UFFDIO_COPY, &uffdio_copy) == -1){
+          if (ioctl(m_uffd, UFFDIO_COPY, &uffdio_copy) == -1){
             std::cerr << "Error ioctl-UFFDIO_COPY - " << strerror(errno) << std::endl;
             exit(-1);
           }
@@ -515,7 +518,7 @@ void * virtual_memory_manager::handler(void *uffd_arg){
           uffdio_copy.len = m_block_size;
           uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
           uffdio_copy.copy = 0;
-          if (ioctl(uffd, UFFDIO_COPY, &uffdio_copy) == -1){
+          if (ioctl(m_uffd, UFFDIO_COPY, &uffdio_copy) == -1){
             std::cerr << "Error ioctl-UFFDIO_COPY for Zero page - " << strerror(errno) << std::endl;
             exit(-1);
           }
@@ -594,6 +597,10 @@ void * virtual_memory_manager::handler(void *uffd_arg){
   return NULL;
   // END: Poll for page fault events
   // -------------------------------
+}
+
+void* virtual_memory_manager::handler_helper(void *context){
+  return ((virtual_memory_manager *)context)->handler();
 }
 
 void virtual_memory_manager::evict_if_needed(){

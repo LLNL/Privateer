@@ -19,20 +19,21 @@
 namespace utility{
   class UFFD{
     public:
-      static void set_virtual_memory_manager(virtual_memory_manager* _vmm){vmm = _vmm;}
-      static void* handler(void *uffd_arg){return vmm->handler(uffd_arg);}
-      static int init_uffd();
-      static void register_uffd_region(uint64_t start, uint64_t length, void* (*fault_handler)(void*), bool read_only, int uffd);
-      static void unregister_uffd_region(uint64_t start, uint64_t length, int uffd);
+      UFFD(){};
+      void set_virtual_memory_manager(virtual_memory_manager* _vmm); 
+      int init_uffd();
+      void register_uffd_region(uint64_t start, uint64_t length, bool read_only, int uffd);
+      void unregister_uffd_region(uint64_t start, uint64_t length, int uffd);
     private:
-      static virtual_memory_manager* vmm;
-      static long m_uffd;
-      static pthread_t thr;
+      virtual_memory_manager* vmm;
+      long m_uffd;
+      pthread_t thr;
   };
 
-  virtual_memory_manager* UFFD::vmm; 
-  long UFFD::m_uffd = -1;
-  pthread_t UFFD::thr;
+  void UFFD::set_virtual_memory_manager(virtual_memory_manager* _vmm){
+    vmm = _vmm;
+  }
+
 
   int UFFD::init_uffd(){
     struct uffdio_api uffdio_api;
@@ -54,10 +55,11 @@ namespace utility{
       std::cerr << "Error - UFFDIO WP not supported" << std::endl;
       exit(-1);
     }
+    vmm->set_uffd(uffd);
     return uffd;
   }
 
-  void UFFD::register_uffd_region(uint64_t addr, uint64_t length, void* (*fault_handler)(void*), bool read_only, int uffd){
+  void UFFD::register_uffd_region(uint64_t addr, uint64_t length, bool read_only, int uffd){
     std::cout << "UFFD Registering address: " << addr << std::endl;
     std::cout << "UFFD Regiatering length: " << length << std::endl;
     /* if(m_uffd == -1){
@@ -80,7 +82,7 @@ namespace utility{
     }
 
     /* Create a thread that will process the userfaultfd events. */
-    s = pthread_create(&thr, NULL, fault_handler, (void*) uffd);
+    s = pthread_create(&thr, NULL, virtual_memory_manager::handler_helper, (void*) vmm);
     std::cout << "UFFD Thread ID: " << thr << std::endl;
     if (s != 0) {
         errno = s;
