@@ -65,7 +65,7 @@ private:
   std::string version_metadata_dir_path;
   size_t file_granularity;
   virtual_memory_manager* vmm;
-  utility::UFFD uffd_obj;
+  // utility::UFFD uffd_obj;
   int m_uffd;
 };
 
@@ -146,9 +146,9 @@ Privateer::Privateer(int action, const char* base_path, const char* stash_base_p
 void* Privateer::create(void *addr,const char *version_metadata_path, size_t region_size, bool allow_overwrite){
   std::string version_metadata_full_path = base_dir_path + "/" + version_metadata_path;
   vmm = new virtual_memory_manager(addr, region_size, version_metadata_full_path, blocks_dir_path, stash_dir_path, allow_overwrite);
-  uffd_obj.set_virtual_memory_manager(vmm);
-  m_uffd = uffd_obj.init_uffd();
-  uffd_obj.register_uffd_region((uint64_t)vmm->get_region_start_address(), vmm->current_region_capacity(), false, m_uffd);
+  // uffd_obj.set_virtual_memory_manager(vmm);
+  utility::UFFD::init_uffd();
+  utility::UFFD::register_uffd_region((uint64_t)vmm->get_region_start_address(), vmm->current_region_capacity(), false, vmm);
   return vmm->get_region_start_address();
 }
 
@@ -157,7 +157,7 @@ void* Privateer::open(void* addr, const char *version_metadata_path){
 }
 
 void* Privateer::open_read_only(void* addr, const char *version_metadata_path){
-  std::cout << "OPENING PRIVATEER READ-ONLY" << std::endl;
+  // std::cout << "OPENING PRIVATEER READ-ONLY" << std::endl;
   return open(addr, version_metadata_path, true);
 }
 
@@ -213,12 +213,11 @@ void* Privateer::open(void* addr, const char *version_metadata_path, bool read_o
     std::cerr << "Error: Directory " << version_metadata_full_path << " does not exists" << std::endl;
     exit(-1);
   }
-  std::cout << "HELLO FROM PRIVATEER OPEN 2" << std::endl;
+  // std::cout << "HELLO FROM PRIVATEER OPEN 2" << std::endl;
   version_metadata_dir_path = version_metadata_full_path;
   vmm = new virtual_memory_manager(addr, version_metadata_dir_path, stash_dir_path, read_only);
-  uffd_obj.set_virtual_memory_manager(vmm);
-  m_uffd = uffd_obj.init_uffd();
-  uffd_obj.register_uffd_region((uint64_t)vmm->get_region_start_address(), vmm->current_region_capacity(), read_only, m_uffd);
+  utility::UFFD::init_uffd();
+  utility::UFFD::register_uffd_region((uint64_t)vmm->get_region_start_address(), vmm->current_region_capacity(), false, vmm);
   return vmm->get_region_start_address();
 }
 
@@ -238,8 +237,11 @@ bool Privateer::version_exists(const char* version_metadata_path){
 
 inline Privateer::~Privateer()
 {
-  uffd_obj.unregister_uffd_region((uint64_t)vmm->get_region_start_address(), vmm->current_region_capacity(), m_uffd);
+  utility::UFFD::unregister_uffd_region((uint64_t)vmm->get_region_start_address(), vmm->current_region_capacity(), vmm);
+  // std::cout << "Before deleting VMM\n";
   delete vmm;
+  utility::UFFD::stop_uffd();
+  // std::cout << "Done stopping UFFD\n";
 }
 
 inline void* Privateer::data(){

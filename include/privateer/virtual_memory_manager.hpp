@@ -23,6 +23,7 @@
 #include <iostream>
 #include <list>
 #include <set>
+#include <queue>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -31,6 +32,8 @@
 // #include <omp.h>
 
 #include "block_storage.hpp"
+#include "utility/fault_event.hpp"
+#include "utility/event_queue.hpp"
 
 #ifdef USE_COMPRESSION
 #include "utility/compression.hpp"
@@ -52,6 +55,7 @@ class virtual_memory_manager {
     bool snapshot(const char* version_metadata_path);
     int close();
     void deactivate_uffd_thread();
+    void add_page_fault_event(utility::fault_event fevent);
   private:
     void* m_region_start_address;
     size_t m_block_size;
@@ -75,26 +79,39 @@ class virtual_memory_manager {
     block_storage *m_block_storage;
 
     std::mutex* blocks_locks;
+    std::mutex add_event_mutex;
     pthread_mutex_t handler_mutex;
+    static std::mutex handler_mutex_global;
     long m_uffd;
     bool uffd_active;
     int uffd_pipe[2];
     // size_t num_locks = 2048;
 
+    utility::event_queue<utility::fault_event> *fault_events_queue;
+    pthread_t fault_handling_thread;
+    long debug = 0;
+
     void evict_if_needed();
     void update_metadata();
     void create_version_metadata(const char* version_metadata_dir_path, const char* block_storage_dir_path, size_t version_capacity, bool allow_overwrite);
+    void start_handler_thread();
+    void stop_handler_thread();
 };
 
 const size_t virtual_memory_manager::FILE_GRANULARITY_DEFAULT_BYTES = 134217728; // 128 MBs 
 const size_t virtual_memory_manager::MAX_MEM_DEFAULT_BLOCKS = 65536;
 const size_t virtual_memory_manager::HASH_SIZE = 64;
 const std::string virtual_memory_manager::EMPTY_BLOCK_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
-
+std::mutex virtual_memory_manager::handler_mutex_global;
+// utility::event_queue<utility::fault_event> fault_events_queue(1);
 // TODO IMPORTANT: Make create() and open() interfaces
 // Create
 virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region_max_capacity,
                                                     std::string version_metadata_path, std::string blocks_path, std::string stash_path, bool allow_overwrite){
+  // printf("Waiting on virtual_memory_manager::handler_mutex_global create Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+  const std::lock_guard<std::mutex> lock(virtual_memory_manager::handler_mutex_global);
+  // printf("Aquired virtual_memory_manager::handler_mutex_global create Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+  // std::cout << "VMM CREATING\n";
   // Verify system page alignment
   size_t pagesize = sysconf(_SC_PAGE_SIZE);
   if ( ((uint64_t) start_address) % pagesize != 0){
@@ -125,29 +142,11 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
     std::cerr << "Error: block_size must be multiple of system page size (" << pagesize << ")" << std::endl;
     exit(-1);
   }
-  std::cout << "start_address: " << (uint64_t) start_address << std::endl;
-  std::cout << "region_max_capacity: " <<  region_max_capacity << std::endl;
-  std::cout << "m_block_size: " << m_block_size << std::endl;
-  // Verity region capacity is multiple of block size
-  /* if (region_max_capacity % m_block_size != 0 && region_max_capacity != 0){
-    // Round capacity to nearest larger multiple of block size
-    region_max_capacity = ((region_max_capacity / m_block_size) + 1) * m_block_size;
-
-    // std::cout << "region_max_capacity: " <<  region_max_capacity << std::endl;
-    
-    if (region_max_capacity > m_block_size){
-      std::cerr << "Virtual Memory Manager: Error - region size must be a non-zero multiple of block size" << std::endl;
-      exit(-1);
-    }
-    else{
-      // std::cout << "WARNING: region capacity less than block size, setting block size to region capacity" << std::endl;
-      m_block_size = region_max_capacity;
-    } 
-  } */
   if (region_max_capacity < m_block_size){
+    std::cout << "WARNING: region capacity less than block size, setting block size to region capacity" << std::endl;
     m_block_size = region_max_capacity;
   }
-  std::cout << "m_block_size after check: " << m_block_size << std::endl;
+  // std::cout << "m_block_size after check: " << m_block_size << std::endl;
   size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
   if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
     max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
@@ -196,26 +195,34 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
 
   m_read_only = false;
 
-  pthread_mutex_init(&handler_mutex, NULL);
   uffd_active = true;
+  /* pthread_mutex_init(&handler_mutex, NULL);
+  
   if (pipe2(uffd_pipe, 0) < 0){
     std::cerr << "Virtual Memory Manager: Error Userfaultfd pipe failed - " << strerror(errno) << std::endl;
     exit(-1);
-  }
+  } */
+  fault_events_queue = new utility::event_queue<utility::fault_event>(1);
+  start_handler_thread();
+  // printf("Releasing virtual_memory_manager::handler_mutex_global create Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
 }
 
 // Open
 virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only){
-  std::cout << "Opening :)" << std::endl;
+  // printf("Waiting on virtual_memory_manager::handler_mutex_global open Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+  const std::lock_guard<std::mutex> lock(virtual_memory_manager::handler_mutex_global);
+  // printf("Aquired virtual_memory_manager::handler_mutex_global open Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+  // std::cout << "VMM OPENING\n";
+  // std::cout << "Opening :)" << std::endl;
   if (read_only){
-    std::cout << "READ ONLY!" << std::endl;
+    // std::cout << "READ ONLY!" << std::endl;
   }
   m_version_metadata_path = version_metadata_path;
   // Read blocks path
   std::string blocks_path_file_name = std::string(m_version_metadata_path) + "/_blocks_path";
   std::ifstream blocks_path_file;
   std::string blocks_dir_path;
-  
+  // std::cout << "Privateer Open 218" << std::endl;
   blocks_path_file.open(blocks_path_file_name);
   if (!blocks_path_file.is_open()){
     std::cerr << "Error opening blocks file path at: " << blocks_path_file_name << std::endl;
@@ -226,7 +233,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   // std::cout << "blocks_dir_path = "<< blocks_dir_path << std::endl;
   m_block_storage = new block_storage(blocks_dir_path, stash_path);
   m_block_size = m_block_storage->get_block_granularity();
-  
+  // std::cout << "Privateer Open 229" << std::endl;
   std::string metadata_file_name = std::string(m_version_metadata_path) + "/_metadata";
   int flags = read_only? O_RDONLY: O_RDWR;
   int metadata_fd = ::open(metadata_file_name.c_str(), flags, (mode_t) 0666);
@@ -234,17 +241,17 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   struct stat st;
   fstat(metadata_fd, &st);
   size_t metadata_size = st.st_size;
-  
+  // std::cout << "Privateer Open 237" << std::endl;
   // Start: Read capacity file
   m_region_max_capacity = version_capacity(version_metadata_path);
-  
+  // std::cout << "Privateer Open 240" << std::endl;
   size_t num_blocks = m_region_max_capacity / m_block_size;
   int mmap_flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE;
   if (addr != nullptr)
   {
     mmap_flags |= MAP_FIXED;
   }
-
+  // std::cout << "Privateer Open 247" << std::endl;
   prot = read_only ? PROT_READ : (PROT_READ | PROT_WRITE);
   
   m_region_start_address = mmap(addr, m_region_max_capacity, prot, mmap_flags, -1, 0);
@@ -252,7 +259,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     std::cerr << "virtual_memory_manager: mmap error - " << strerror(errno)<< std::endl;
     exit(-1);
   }
-  
+  // std::cout << "Privateer Open 255" << std::endl;
   // std::cout << "num_blocks: " << num_blocks << std::endl;
   blocks_ids = new std::string[num_blocks];
   char* metadata_content = new char[metadata_size];
@@ -261,7 +268,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     std::cerr << "virtual_memory_manager: Error reading metadata - " << strerror(errno) << std::endl;
     exit(-1);
   }
-  
+  // std::cout << "Privateer Open 264" << std::endl;
   std::string all_hashes(metadata_content, metadata_size);
   
   uint64_t offset = 0;
@@ -270,9 +277,10 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     // std::cout << "Privateer: Initializing blocks and regions, iteration no. " << i << std::endl;
     // std::cout << "blocks_ids_index: " << (i / HASH_SIZE) << std::endl;
     std::string block_hash(all_hashes, i, HASH_SIZE);
+    // std::cout << "before accessing array" << std::endl;
     blocks_ids[i / HASH_SIZE] = block_hash;
   }
-  
+  // std::cout << "Privateer Open 275" << std::endl;
   size_t num_occupied_blocks = metadata_size / HASH_SIZE;
   for (size_t i = num_occupied_blocks; i < num_blocks; i++){
     // std::cout << "blocks_ids_index Next: " << i << std::endl;
@@ -282,26 +290,30 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   // blocks_locks = new std::mutex[num_blocks];
   
   delete [] metadata_content;
-  
+  // std::cout << "Privateer Open 285" << std::endl;
 
   size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
   if ( std::isnan(max_mem_size_blocks) || max_mem_size_blocks == 0){
     max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
   }
   m_max_mem_size = max_mem_size_blocks * m_block_size;
-
+  // std::cout << "Privateer Open 292" << std::endl;
   // In some cases /dev/null file descriptorr was affected, temporary solution is check and re-open
   struct stat st_dev_null;
   if (fstat(0,&st_dev_null) != 0){
     int dev_null_fd = ::open("/dev/null",O_RDWR);
   }
   m_read_only = read_only;
-  pthread_mutex_init(&handler_mutex, NULL);
+  /* pthread_mutex_init(&handler_mutex, NULL);
   uffd_active = true;
   if (pipe2(uffd_pipe, 0) < 0){
     std::cerr << "Virtual Memory Manager: Error Userfaultfd pipe failed - " << strerror(errno) << std::endl;
     exit(-1);
-  }
+  } // std::cout << "Privateer Open 304" << std::endl; */
+  uffd_active = true;
+  fault_events_queue = new utility::event_queue<utility::fault_event>(1);
+  start_handler_thread();
+  // printf("Releasing virtual_memory_manager::handler_mutex_global open Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
 }
 
 void virtual_memory_manager::set_uffd(uint64_t uffd){
@@ -309,304 +321,190 @@ void virtual_memory_manager::set_uffd(uint64_t uffd){
 }
 
 void * virtual_memory_manager::handler(){
-  std::cout << "Beginning of handler" << std::endl;
-  // START: UFFD variables
-  static struct uffd_msg msg;   /* Data read from userfaultfd */
-  static int fault_cnt = 0;     /* Number of faults so far handled */
-  /* struct uffdio_copy uffdio_copy;
-  struct uffdio_zeropage uffdio_zeropage; */
-  ssize_t nread;
-  
-  // Get UFFD information
-    struct pollfd pollfd[3] = {
-        { .fd = m_uffd, .events = POLLIN }
-      , { .fd = uffd_pipe[0], .events = POLLIN }
-      , { .fd = uffd_pipe[1], .events = POLLIN }
-    };
-    int nready;
-  // END: UFFD variables
-  // -------------------
-
-  // START: Poll for page fault events
+  // std::cout << "Starting handler FUNC in VMM\n";
+  // printf("uffd_active %d\n", uffd_active);
   while (uffd_active){
-    
+    /* debug++;
+    if (debug % 10000000 == 0){
+      printf("In while \n");
+    } */
+    if (!fault_events_queue->is_empty()){
+      // std::cout << "Handling in VMM\n";
+      // printf("Waiting on virtual_memory_manager::handler_mutex_global Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+      // const std::lock_guard<std::mutex> lock(virtual_memory_manager::handler_mutex_global);
+      // printf("Aquired virtual_memory_manager::handler_mutex_global handler Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+      // if (!fault_events_queue.empty()){
+        // Get and assert faulting address
+        utility::fault_event fevent = fault_events_queue->dequeue();
+        uint64_t fault_address = fevent.address; // (uint64_t) (msg.arg.pagefault.address); // &~(m_block_size - 1));
+        uint64_t start_address = (uint64_t) m_region_start_address;
+        uint64_t block_index = (fault_address - start_address) / m_block_size;
+        uint64_t block_address = start_address + block_index * m_block_size;
+        // std::cout << "BLOCK ADDRESS: " << block_address << std::endl;
+        
+        // Identify fault type
+        bool is_wp_fault = fevent.is_wp_fault;
+        bool is_write_fault = fevent.is_write_fault;
+        /* is_wp_fault = (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP);
+        is_write_fault = ((!is_wp_fault) && (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE)); */
 
-    std::cout << "POLLING!!!" << std::endl;
-    nready = poll(&pollfd[0], 3, -1);
-    if (nready == -1){
-      std::cerr << "Error polling UFFD event - " << strerror(errno) << std::endl;
-      exit(-1);
-    }
-
-    if (pollfd[1].revents & POLLIN || pollfd[2].revents & POLLIN){
-      std::cout << "POLL RECEIVED INTERNAL SIGNAL, Quitting, Bye :)" << std::endl;
-      break;
-    }
-
-    nread = read(m_uffd, &msg, sizeof(msg));
-    if (nread == 0) {
-        std::cerr << "EOF on userfaultfd!" << std::endl;
-        exit(EXIT_FAILURE);
-    }
-
-    if (nread == -1){
-      std::cerr << "Error reading UFFD file" << std::endl;
-      exit(-1);
-    }
-
-    /* We expect only one kind of event; verify that assumption. */
-
-    if (msg.event != UFFD_EVENT_PAGEFAULT) {
-        std::cerr << "Unexpected event on userfaultfd" << std::endl;
-        exit(EXIT_FAILURE);
-    }
-    // const std::lock_guard<std::mutex> lock(handler_mutex);
-    if (pthread_mutex_lock(&handler_mutex) != 0){
-      std::cerr << "Virtual Memory Manager: Error locking handler mutex" << strerror(errno) << std::endl;
-      exit(-1);
-    }
-    std::cout << "CAUGHT PAGE FAULT" << std::endl;
-    // Get and assert faulting address
-    uint64_t fault_address = (uint64_t) (msg.arg.pagefault.address); // &~(m_block_size - 1));
-    uint64_t start_address = (uint64_t) m_region_start_address;
-    uint64_t block_index = (fault_address - start_address) / m_block_size;
-    uint64_t block_address = start_address + block_index * m_block_size;
-
-    std::cout << "BLOCK ADDRESS: " << block_address << std::endl;
-    
-    // Identify fault type
-    bool is_wp_fault, is_write_fault = false;
-    is_wp_fault = (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP);
-    is_write_fault = ((!is_wp_fault) && (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE));
-
-    // Handling
-    if (is_wp_fault){
-      if (m_read_only){
-        std::cerr << "Privateer Error: write fault on a read-only region" << std::endl;
-        exit(-1);
-      }
-      // Move from clean_lru to dirty_lru
-      clean_lru.remove((uint64_t) block_address);
-      dirty_lru.push_front((uint64_t) block_address);
-      if (stash_set.find(block_address) != stash_set.end()){
-        std::cout << "STASHED TO CLEAN TO DIRTY" << std::endl;
-        if (!m_block_storage->unstash_block(block_index)){
-          std::cerr << "virtual_memory_manager: Error unstashing block with index= " << block_index << std::endl;
-          exit(-1);
-        }
-        stash_set.erase(block_address);
-      }
-      // Write-unprotect
-      std::cout << "write-protect fault of present page with address: " << block_address << std::endl;
-      struct uffdio_writeprotect uffdio_writeprotect;
-      uffdio_writeprotect.range.start = block_address;
-      uffdio_writeprotect.range.len = m_block_size;
-      uffdio_writeprotect.mode = 0; // UFFDIO_WRITEPROTECT_MODE_DONTWAKE;
-      if (ioctl(m_uffd, UFFDIO_WRITEPROTECT, &uffdio_writeprotect) == -1){
-          std::cerr << "Error ioctl-UFFDIO_WRITEPROTECT" << strerror(errno) << std::endl;
-          exit(-1);
-      }
-      /* msync();
-      exit(0); */
-      // WAKE
-      /* if (ioctl(uffd, UFFDIO_WAKE, &uffdio_writeprotect) == -1){
-        std::cerr << "Error: ioctl-UFFDIO_WAKE - "   << strerror(errno) << std::endl;
-        exit(-1);
-      } */
-    }
-    else{
-      if (present_blocks.find(block_address) == present_blocks.end()){
-        evict_if_needed();
-        // Check if backing block exists
-        int backing_block_fd = -1;
-        std::string backing_block_path = "";
-        std::string stash_backing_block_path = m_block_storage->get_block_stash_path(block_index); 
-        std::string blocks_path = m_block_storage->get_blocks_path();
-        // std::cout << "block_index = " << block_index << std::endl;
-        if (!stash_backing_block_path.empty()){
-          // std::cout << "Getting block: " << block_index << " from stash " << stash_backing_block_path << std::endl;
-          backing_block_path = stash_backing_block_path;
-        }
-        else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){
-          // std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
-          backing_block_path = m_block_storage->get_block_full_path(block_index, blocks_ids[block_index]) + "/" + blocks_ids[block_index];
-        }
-        bool is_zero_page = false;
-        if (!backing_block_path.empty()){
-          std::cout << "block exists" << std::endl;
-          void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-          if (temp_buffer == MAP_FAILED){
-            std::cerr << "Error mmap temp: " << strerror(errno) << std::endl;
+        // Handling
+        // std::cout << "Identifier: " << this << std::endl;
+        // printf("Starting address: %ld blocks_ids address: %ld Thread ID: %ld\n", (uint64_t) m_region_start_address, (uint64_t) &blocks_ids[0], (uint64_t) syscall(SYS_gettid));
+        if (is_wp_fault){
+          if (m_read_only){
+            std::cerr << "Privateer Error: write fault on a read-only region" << std::endl;
             exit(-1);
           }
-
-          // read block content into temporary buffer
-          backing_block_fd = open(backing_block_path.c_str(), O_RDONLY);
-          if (backing_block_fd == -1){
-            std::cerr << "virtual_memory_manager: Error opening backing block: " << backing_block_path  << " for address: " << block_address << " - " << strerror(errno) << std::endl;
-            exit(-1);
+          // std::cout << "WP Fault Being Handled\n";
+          // Move from clean_lru to dirty_lru
+          clean_lru.remove((uint64_t) block_address);
+          dirty_lru.push_front((uint64_t) block_address);
+          if (stash_set.find(block_address) != stash_set.end()){
+            // std::cout << "STASHED TO CLEAN TO DIRTY" << std::endl;
+            if (!m_block_storage->unstash_block(block_index)){
+              std::cerr << "virtual_memory_manager: Error unstashing block with index= " << block_index << std::endl;
+              exit(-1);
+            }
+            stash_set.erase(block_address);
           }
-          #ifdef USE_COMPRESSION
-          // std::cout << "USING COMPRESSION DECOMPRESSING" << std::endl;
-          size_t compressed_block_size = utility::get_file_size(backing_block_path.c_str());
-          void* const read_buffer = malloc(compressed_block_size);
-          if (pread(backing_block_fd, read_buffer, compressed_block_size, 0) == -1){
-            std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
-            exit(-1);
-          }
-          size_t decompressed_size = utility::decompress(read_buffer, temp_buffer, compressed_block_size);
-          free(read_buffer);
-          #else
-          // std::cout << "NOT USING COMPRESSION" << std::endl;
-          if (pread(backing_block_fd, temp_buffer, m_block_size, 0) == -1){
-            std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
-            exit(-1);
-          }
-          #endif
-          
-          if (::close(backing_block_fd) == -1){
-            std::cerr << "virtual_memory_manager: Error closing backing block: " << backing_block_path << " - " << strerror(errno) << std::endl;
-            exit(-1);
-          }
-          
-          struct uffdio_copy uffdio_copy;
-          uffdio_copy.src = (unsigned long) temp_buffer;
-          uffdio_copy.dst = (unsigned long) block_address;
-          uffdio_copy.len = m_block_size;
-          uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
-          uffdio_copy.copy = 0;
-          if (ioctl(m_uffd, UFFDIO_COPY, &uffdio_copy) == -1){
-            std::cerr << "Error ioctl-UFFDIO_COPY - " << strerror(errno) << std::endl;
-            exit(-1);
-          }
-          std::cout << "uffdio_copy.copy = " << uffdio_copy.copy << std::endl;
-
-          /* std::cout << "Write-protecting region" << std::endl;
+          // Write-unprotect
+          // std::cout << "write-protect fault of present page with address: " << block_address << std::endl;
           struct uffdio_writeprotect uffdio_writeprotect;
           uffdio_writeprotect.range.start = block_address;
           uffdio_writeprotect.range.len = m_block_size;
-          uffdio_writeprotect.mode = UFFDIO_WRITEPROTECT_MODE_WP;
-          if (ioctl(uffd, UFFDIO_WRITEPROTECT, &uffdio_writeprotect) == -1){
-            std::cerr << "Error ioctl-UFFDIO_WRITEPROTECT - " << strerror(errno) << std::endl;
-            exit(-1);
-          } */
+          uffdio_writeprotect.mode = 0; // UFFDIO_WRITEPROTECT_MODE_DONTWAKE;
+          if (ioctl(m_uffd, UFFDIO_WRITEPROTECT, &uffdio_writeprotect) == -1){
+              std::cerr << "Error ioctl-UFFDIO_WRITEPROTECT - " << strerror(errno) << std::endl;
+              exit(-1);
+          }
         }
         else{
-          std::cout << "Zero Page" << std::endl;
-          /* uffdio_zeropage.range.start = block_address;
-          uffdio_zeropage.range.len = m_block_size;
-          uffdio_zeropage.mode = 0; // UFFDIO_ZEROPAGE_MODE_DONTWAKE;
-          uffdio_zeropage.zeropage = 0;
-          if (ioctl(uffd, UFFDIO_ZEROPAGE, &uffdio_zeropage) == -1){
-            std::cerr << "Error: ioctl-UFFDIO_ZEROPAGE - "   << strerror(errno) << std::endl;
-            exit(-1);
-          }
-          std::cout << "ZEROPAGE COPIED BYTES: " << uffdio_zeropage.zeropage << std::endl; */
-          char* tmp_buff;
-          if (posix_memalign((void**)&tmp_buff, m_block_size, m_block_size)) {
-            std::cerr << "Virtual Memory Manager: Error posix_memalign - " << strerror(errno) << std::endl;
-          }
-          void *addr = mmap((void *)tmp_buff, m_block_size, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
-          if (addr == MAP_FAILED){
-            std::cout << "Error mmap zero page" << std::endl;
-            exit(-1);
-          }
-          struct uffdio_copy uffdio_copy;
-          uffdio_copy.src = (unsigned long) addr;
-          uffdio_copy.dst = (unsigned long) block_address;
-          uffdio_copy.len = m_block_size;
-          uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
-          uffdio_copy.copy = 0;
-          if (ioctl(m_uffd, UFFDIO_COPY, &uffdio_copy) == -1){
-            std::cerr << "Error ioctl-UFFDIO_COPY for Zero page - " << strerror(errno) << std::endl;
-            exit(-1);
-          }
-          std::cout << "uffdio_copy.copy = " << uffdio_copy.copy << std::endl;
-          is_zero_page = true;
-          if (munmap(addr, m_block_size) == -1){
-            std::cerr << "Error unmapping temporary buffer - " << strerror(errno) << std::endl;
-            exit(-1);
-          }
-        }
-        /* dirty_lru.push_front(block_address);
-        msync();
-        exit(0); */
-        // if (is_write_fault && is_zero_page){
-          // dirty_lru.push_front(block_address);
-        // } 
-        // else{
-          clean_lru.push_front(block_address);
-        // }
-        present_blocks.insert(block_address);
+          if (present_blocks.find(block_address) == present_blocks.end()){
+            // std::cout << "Handler 420" << std::endl;
+            evict_if_needed();
+            // Check if backing block exists
+            int backing_block_fd = -1;
+            std::string backing_block_path = ""; // printf("Handler 424 %d\n", syscall(SYS_gettid)); // std::cout << "Handler 424\n";
+            std::string stash_backing_block_path = m_block_storage->get_block_stash_path(block_index); // std::cout << "Handler 425" << std::endl;
+            std::string blocks_path = m_block_storage->get_blocks_path(); // std::cout << "Handler 426" << std::endl;
+            // std::cout << "Handler 427" << std::endl;
+            // std::cout << "Handler 427 DASH NEW" << std::endl;
+            // std::cout << blocks_ids[block_index] << std::endl;
+            // std::cout << "Handler 427 AFTER PRINT" << std::endl;
+            // std::cout << "block_index = " << block_index << std::endl;
+            if (!stash_backing_block_path.empty()){ // std::cout << "Handler 427 + 1" << std::endl;
+              // std::cout << "Getting block: " << block_index << " from stash " << stash_backing_block_path << std::endl;
+              backing_block_path = stash_backing_block_path;
+            }  
+            else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){ // std::cout << "Handler 427 + 2" << std::endl;
+              // std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
+              backing_block_path = m_block_storage->get_block_full_path(block_index, blocks_ids[block_index]) + "/" + blocks_ids[block_index];
+            }  // std::cout << "Handler 436" << std::endl;
+            bool is_zero_page = false;
+            if (!backing_block_path.empty()){
+              // std::cout << "block exists" << std::endl;
+              void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+              if (temp_buffer == MAP_FAILED){
+                std::cerr << "Error mmap temp: " << strerror(errno) << std::endl;
+                exit(-1);
+              }
 
-        // WP 
-        /* std::cout << "Write-protecting region" << std::endl;
-        struct uffdio_writeprotect uffdio_writeprotect;
-        uffdio_writeprotect.range.start = block_address;
-        uffdio_writeprotect.range.len = m_block_size;
-        uffdio_writeprotect.mode = UFFDIO_WRITEPROTECT_MODE_WP;
-        if (ioctl(uffd, UFFDIO_WRITEPROTECT, &uffdio_writeprotect) == -1){
-          std::cerr << "Error ioctl-UFFDIO_WRITEPROTECT - " << strerror(errno) << std::endl;
-          exit(-1);
-        } */
-        
-        // WAKE
-        /* if (is_zero_page){
-          if (ioctl(uffd, UFFDIO_WAKE, &uffdio_zeropage.range) == -1){
-            std::cerr << "Error: ioctl-UFFDIO_WAKE - "   << strerror(errno) << std::endl;
-            exit(-1);
+              // read block content into temporary buffer
+              backing_block_fd = open(backing_block_path.c_str(), O_RDONLY);
+              if (backing_block_fd == -1){
+                std::cerr << "virtual_memory_manager: Error opening backing block: " << backing_block_path  << " for address: " << block_address << " - " << strerror(errno) << std::endl;
+                exit(-1);
+              }
+              #ifdef USE_COMPRESSION
+              // std::cout << "USING COMPRESSION DECOMPRESSING" << std::endl;
+              // std::cout << "Backing block path: " << backing_block_path.c_str() << std::endl;
+              // printf("Starting address: %ld blocks_ids address: %ld Thread ID: %ld", (uint64_t) m_region_start_address, (uint64_t) &blocks_ids[0], (uint64_t) syscall(SYS_gettid));
+              size_t compressed_block_size = utility::get_file_size(backing_block_path.c_str());
+              void* const read_buffer = malloc(compressed_block_size);
+              if (pread(backing_block_fd, read_buffer, compressed_block_size, 0) == -1){
+                std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
+                exit(-1);
+              }
+              size_t decompressed_size = utility::decompress(read_buffer, temp_buffer, compressed_block_size);
+              free(read_buffer);
+              #else
+              // std::cout << "NOT USING COMPRESSION" << std::endl;
+              if (pread(backing_block_fd, temp_buffer, m_block_size, 0) == -1){
+                std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
+                exit(-1);
+              }
+              #endif
+              
+              if (::close(backing_block_fd) == -1){
+                std::cerr << "virtual_memory_manager: Error closing backing block: " << backing_block_path << " - " << strerror(errno) << std::endl;
+                exit(-1);
+              }
+              
+              struct uffdio_copy uffdio_copy;
+              uffdio_copy.src = (unsigned long) temp_buffer;
+              uffdio_copy.dst = (unsigned long) block_address;
+              uffdio_copy.len = m_block_size;
+              uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
+              uffdio_copy.copy = 0;
+              if (ioctl(m_uffd, UFFDIO_COPY, &uffdio_copy) == -1){
+                std::cerr << "Error ioctl-UFFDIO_COPY - " << strerror(errno) << std::endl;
+                exit(-1);
+              }
+            }
+            else{
+              char* tmp_buff;
+              if (posix_memalign((void**)&tmp_buff, m_block_size, m_block_size)) {
+                std::cerr << "Virtual Memory Manager: Error posix_memalign - " << strerror(errno) << std::endl;
+              }
+              void *addr = mmap((void *) tmp_buff, m_block_size, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+              if (addr == MAP_FAILED){
+                std::cerr << "Error mmap zero page " << strerror(errno) << std::endl;
+                exit(-1);
+              }
+              // printf("TEMP ADDRESS %ld blocks_ids %ld m_block_size %ld from thread %ld\n", (uint64_t) addr, (uint64_t) &blocks_ids[0], m_block_size , (uint64_t) syscall(SYS_gettid));
+              struct uffdio_copy uffdio_copy;
+              uffdio_copy.src = (unsigned long) addr;
+              uffdio_copy.dst = (unsigned long) block_address;
+              uffdio_copy.len = m_block_size;
+              uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
+              uffdio_copy.copy = 0;
+              if (ioctl(m_uffd, UFFDIO_COPY, &uffdio_copy) == -1){
+                std::cerr << "Error ioctl-UFFDIO_COPY for Zero page - " << strerror(errno) << std::endl;
+                exit(-1);
+              }
+              // std::cout << "uffdio_copy.copy = " << uffdio_copy.copy << std::endl;
+              is_zero_page = true;
+              if (munmap(addr, m_block_size) == -1){
+                std::cerr << "Error unmapping temporary buffer - " << strerror(errno) << std::endl;
+                exit(-1);
+              }
+            }
+            clean_lru.push_front(block_address);
+            present_blocks.insert(block_address);
           }
         }
-        else {
-          struct uffdio_range uffdio_range;
-          uffdio_range.start = block_address;
-          uffdio_range.len = m_block_size;
-          if (ioctl(uffd, UFFDIO_WAKE, &uffdio_range) == -1){
-            std::cerr << "Error: ioctl-UFFDIO_WAKE - "   << strerror(errno) << std::endl;
-            exit(-1);
-          }
-        } */
-      }
+      // }
+      // printf("Releasing virtual_memory_manager::handler_mutex_global handler Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
     }
-    /* if (is_wp_fault){
-      msync();
-      exit(0);
-    } */
-    // START DEBUG
-    /* uint64_t * debug = (uint64_t *) (block_address + 224);
-    std::cout << "debug start: " << (uint64_t) debug << std::endl;
-    for (uint64_t i = 0; i < (1048548); i++){
-      std::cout << "debug[" << i << "]: " << debug[i] << std::endl;
-    } */
-    // END DEBUG
-    /* struct uffdio_range uffdio_range;
-    uffdio_range.start = block_address;
-    uffdio_range.len = m_block_size;
-    if (ioctl(uffd, UFFDIO_WAKE, &uffdio_range) == -1){
-      std::cerr << "Error: ioctl-UFFDIO_WAKE - "   << strerror(errno) << std::endl;
-      exit(-1);
-    } */
-    std::cout << "HANDLED PAGE FAULT" << std::endl;
-    if (pthread_mutex_unlock(&handler_mutex) != 0){
-      std::cerr << "Virtual Memory Manager: Error locking handler mutex" << strerror(errno) << std::endl;
-      exit(-1);
-    }
+    // std::cout << "The queue was empty\n";
   }
-  std::cout << "THREAD QUITTING HERE" << std::endl;
+  // std::cout << "THREAD QUITTING HERE" << std::endl;
   return NULL;
   // END: Poll for page fault events
   // -------------------------------
 }
 
 void* virtual_memory_manager::handler_helper(void *context){
+  // printf("Starting Handler HELPER from %ld\n", (uint64_t) syscall(SYS_gettid));
   return ((virtual_memory_manager *)context)->handler();
 }
 
 void virtual_memory_manager::evict_if_needed(){
   void* to_evict;
   if ((present_blocks.size()*m_block_size) >= m_max_mem_size){
-    std::cout << "EVICTING" << std::endl;
+    // std::cout << "EVICTING" << std::endl;
     if (clean_lru.size() > 0){
       to_evict = (void*) clean_lru.back();
       // std::cout << "Evicting clean block: " << ((uint64_t) to_evict - (uint64_t) m_region_start_address) / m_block_size << std::endl;
@@ -640,11 +538,14 @@ void virtual_memory_manager::evict_if_needed(){
 }
 
 void virtual_memory_manager::msync(){
+  const std::lock_guard<std::mutex> lock(virtual_memory_manager::handler_mutex_global);
+  // std::cout << "MSYNC" << std::endl;
   // 1) Write dirty_lru
-  std::cout << "size of dirty LRU: "<< dirty_lru.size() << std::endl;
+  // std::cout << "size of dirty LRU: "<< dirty_lru.size() << std::endl;
   std::vector<uint64_t> dirty_lru_vector(dirty_lru.begin(), dirty_lru.end());
-  // #pragma omp parallel for
+  #pragma omp parallel for
   for (auto dirty_lru_iterator = dirty_lru_vector.begin(); dirty_lru_iterator != dirty_lru_vector.end(); ++dirty_lru_iterator){
+    // std::cout << "storing block\n";
     block_storage block_storage_local(*m_block_storage);
     void* block_address = (void*) *dirty_lru_iterator;
     // if (stash_set.find((uint64_t) block_address) == stash_set.end()){
@@ -664,8 +565,9 @@ void virtual_memory_manager::msync(){
         exit(-1);
       } */
       
-      // #pragma omp critial
-      // {
+      #pragma omp critical
+      {
+        // std::cout << "wp-ing block\n";
         struct uffdio_writeprotect uffdio_writeprotect;
         uffdio_writeprotect.range.start = (uint64_t) block_address;
         uffdio_writeprotect.range.len = (uint64_t) m_block_size;
@@ -674,8 +576,9 @@ void virtual_memory_manager::msync(){
             std::cerr << "Error ioctl-UFFDIO_WRITEPROTECT" << strerror(errno) << std::endl;
             exit(-1);
         }
+        // std::cout << "done wp-ing block\n";
         clean_lru.push_front((uint64_t)block_address);
-      // }
+      }
     // }
   }
   dirty_lru.clear();
@@ -683,31 +586,31 @@ void virtual_memory_manager::msync(){
   // 2) Commit stashed blocks
   // std::cout << "SIZE OF STASH SET: " << stash_set.size() << std::endl;
   std::vector<uint64_t> stash_vector(stash_set.begin(), stash_set.end());
-  // #pragma omp parallel for
+  #pragma omp parallel for
   for (auto stash_iterator = stash_vector.begin(); stash_iterator != stash_vector.end(); ++stash_iterator){
     block_storage block_storage_local(*m_block_storage);
     void* block_address = (void*) *stash_iterator;
     uint64_t block_index = ((uint64_t) block_address - (uint64_t) m_region_start_address) / m_block_size;
-    //#pragma omp critical
-    // {
+    #pragma omp critical
+    {
       std::string block_hash = /* block_storage_local.*/ m_block_storage->commit_stash_block(block_index);
       if (block_hash.empty()){
         std::cerr << "virtual_memory_manager: Error committing stash block with address: " << (uint64_t) block_address << std::endl;
         exit(-1);
       }
       blocks_ids[block_index] = block_hash;
-    // }
+    }
   }
   stash_set.clear();
   update_metadata();
-  std::cout << "DONE MSYNC" << std::endl;
+  // std::cout << "DONE MSYNC" << std::endl;
   struct stat st_dev_null;
   if (fstat(0,&st_dev_null) != 0){
     // std::cout << "Opening /dev/null" << std::endl;
     int dev_null_fd = ::open("/dev/null",O_RDWR);
     // std::cout << "/dev/null FD: " << dev_null_fd << std::endl;
   }
-  std::cout << "DONE MSYNC DEV NULL" << std::endl;
+  // std::cout << "DONE MSYNC DEV NULL" << std::endl;
 }
 
 // TODO: Redesign and Rewrite
@@ -763,6 +666,7 @@ bool virtual_memory_manager::snapshot(const char* version_metadata_path){
 }
 
 void virtual_memory_manager::update_metadata(){
+  // const std::lock_guard<std::mutex> lock(virtual_memory_manager::handler_mutex_global);
   // std::cout << "present_blocks.size(): " << present_blocks.size() << std::endl;
   if (present_blocks.size() == 0){
     return;
@@ -789,7 +693,7 @@ void virtual_memory_manager::update_metadata(){
   if (metadata_fd == -1){
     std::cerr << "virtual_memory_manager: Error opening metadata file " << strerror(errno) << std::endl;
     exit(-1);
-  }
+  } // printf("METADATA FD: %d THREAD %ld \n",metadata_fd, (uint64_t) syscall(SYS_gettid));
   const auto written = ::pwrite(metadata_fd ,(void*) blocks_bytes, num_blocks*HASH_SIZE, 0);
   if (written == -1){
     std::cerr << "Error, failed to update metadata and mappings: " << strerror(errno) << std::endl;
@@ -797,6 +701,7 @@ void virtual_memory_manager::update_metadata(){
   }
   if (::close(metadata_fd == -1)){
     std::cerr << "Virtual Memory Manager: Error closing metadata file after update - " << strerror(errno) << std::endl;
+    // printf("ERROR METADATA FD: %d THREAD %ld ",metadata_fd, (uint64_t) syscall(SYS_gettid));
     exit(-1);
   }
   delete [] blocks_bytes;
@@ -820,6 +725,7 @@ size_t virtual_memory_manager::version_capacity(std::string version_path){
     std::cerr << "Error reading reading file" << std::endl;
     return (size_t) -1;
   }
+  size_file.close();
   try {
     size_t size = std::stol(size_string);
     return size;
@@ -881,45 +787,78 @@ void virtual_memory_manager::create_version_metadata(const char* version_metadat
   capacity_file.close();
 }
 
+void virtual_memory_manager::add_page_fault_event(utility::fault_event fevent){
+  // printf("Waiting on virtual_memory_manager::add_event_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+  const std::lock_guard<std::mutex> lock(virtual_memory_manager::add_event_mutex);
+  // printf("Aquired virtual_memory_manager::add_event_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+  fault_events_queue->enqueue(fevent);
+  // printf("Releasing virtual_memory_manager::add_event_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+}
+
+void virtual_memory_manager::start_handler_thread(){
+  // std::cout << "Starting handler thread in VMM";
+  int status = pthread_create(&fault_handling_thread, NULL, virtual_memory_manager::handler_helper, (void*) this);
+  if (status != 0){
+    std::cerr << "VMM: Error pthread_create - " << strerror(status) << std::endl;
+    exit(-1);
+  }
+}
+
+void virtual_memory_manager::stop_handler_thread(){
+  // std::cout << "VMM: stop_handler_thread before pthread_join\n";
+  uffd_active = false;
+  int status = pthread_join(fault_handling_thread,NULL);
+  if (status != 0){
+    std::cerr << "VMM: Error pthread_join - " << strerror(status) << std::endl;
+    exit(-1);
+  }
+  // std::cout << "VMM: stop_handler_thread after pthread_join\n";
+}
+
 int virtual_memory_manager::close(){
   //  << "ByeBye VMM" << std::endl;
   msync();
   std::set<uint64_t>::iterator it;
-  std::cout << "CLOSE BEFORE ITR" << std::endl;
+  // std::cout << "CLOSE BEFORE ITR" << std::endl;
   for (it = present_blocks.begin(); it != present_blocks.end(); ++it) {
-    std::cout << "munmapping address: " << *it << std::endl;
-    std::cout << "munmapping size: " << m_block_size << std::endl;
+    // std::cout << "munmapping address: " << *it << std::endl;
+    // std::cout << "munmapping size: " << m_block_size << std::endl;
     void* address = (void*) *it;
+    // printf("Munmapping address %ld size %ld thread %ld", (uint64_t) address, (uint64_t) m_block_size, syscall(SYS_gettid));
     int status = munmap(address, m_block_size);
     if (status == -1){
       std::cerr << "virtual_memory_manager: Error unmapping region with address: " << *it << " - " << strerror(errno) << std::endl;
       return -1;
     }
   }
-  std::cout << "CLOSE AFTER ITR" << std::endl;
+  // std::cout << "CLOSE AFTER ITR" << std::endl;
   delete [] blocks_ids;
   // delete [] blocks_locks;
   delete m_block_storage;
   m_region_start_address = nullptr;
-  std::cout << "CLOSE RETURNING" << std::endl;
+  // std::cout << "CLOSE RETURNING" << std::endl;
+  stop_handler_thread();
   return 0;
 }
 
 void virtual_memory_manager::deactivate_uffd_thread(){
-  std::cout << "START: deactivate_uffd_thread" << std::endl;
+  // std::cout << "START: deactivate_uffd_thread" << std::endl;
   uffd_active = false;
-  char bye[5] = "bye";
-  write(uffd_pipe[1], bye, 3);
-  std::cout << "END: deactivate_uffd_thread" << std::endl;
+  /* char bye[5] = "bye";
+  write(uffd_pipe[1], bye, 3); */
+  // std::cout << "END: deactivate_uffd_thread" << std::endl;
 }
 
 virtual_memory_manager::~virtual_memory_manager(){
-  std::cout << "Begin VMM dest~"  << std::endl;
+  // std::cout << "Begin VMM dest~"  << std::endl;
   if (close() !=0){
     std::cerr << "virtual_memory_manager: Error, image not closed appropriately" << std::endl;
     exit(-1);
   }
-  std::cout << "VMM dest~ After close" << std::endl;
-  pthread_mutex_destroy(&handler_mutex);
-  std::cout << "VMM dest~ After mutex destroy"<< std::endl;
+  // std::cout << "VMM closed\n";
+  delete fault_events_queue;
+  // std::cout << "fault_events_queue deleted\n";
+  // std::cout << "VMM dest~ After close" << std::endl;
+  // pthread_mutex_destroy(&handler_mutex);
+  // std::cout << "VMM dest~ After mutex destroy"<< std::endl;
 }
