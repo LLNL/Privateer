@@ -27,7 +27,8 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-// #include <thread>
+#include <thread>
+#include <chrono>
 // #include <mutex>
 // #include <omp.h>
 
@@ -56,6 +57,9 @@ class virtual_memory_manager {
     int close();
     void deactivate_uffd_thread();
     void add_page_fault_event(utility::fault_event fevent);
+    void add_page_fault_event_all(utility::fault_event fevent);
+    size_t get_block_size();
+    uint64_t get_block_address(uint64_t fault_address);
   private:
     void* m_region_start_address;
     size_t m_block_size;
@@ -83,14 +87,14 @@ class virtual_memory_manager {
     pthread_mutex_t handler_mutex;
     static std::mutex handler_mutex_global;
     long m_uffd;
-    bool uffd_active;
+    std::atomic<bool> uffd_active;
     int uffd_pipe[2];
     // size_t num_locks = 2048;
 
     utility::event_queue<utility::fault_event> *fault_events_queue;
-    const int num_handling_threads = 1;
+    const int num_handling_threads = 8; // 1;
     std::vector<pthread_t> fault_handling_threads; // Change to sub-regions (declaration [done], usage (TODO))
-    long debug = 0;
+    std::atomic<long> debug = 0;
 
     void evict_if_needed(int sub_region_index);
     void update_metadata(int sub_region_index);
@@ -214,7 +218,7 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
     stash_set.push_back(stash_set_i);
     present_blocks.push_back(present_blocks_i);
   }
-  fault_events_queue = new utility::event_queue<utility::fault_event>(1);
+  fault_events_queue = new utility::event_queue<utility::fault_event>(num_handling_threads);
   start_handler_thread();
   // printf("Releasing virtual_memory_manager::handler_mutex_global create Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
 }
@@ -334,7 +338,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     present_blocks.push_back(present_blocks_i);
   }
   uffd_active = true;
-  fault_events_queue = new utility::event_queue<utility::fault_event>(1);
+  fault_events_queue = new utility::event_queue<utility::fault_event>(num_handling_threads);
   start_handler_thread();
   // printf("Releasing virtual_memory_manager::handler_mutex_global open Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
 }
@@ -344,26 +348,34 @@ void virtual_memory_manager::set_uffd(uint64_t uffd){
 }
 
 void * virtual_memory_manager::handler(){
-  std::cout << "Starting handler FUNC in VMM\n";
+  // std::cout << "Starting handler FUNC in VMM\n";
   // printf("uffd_active %d\n", uffd_active);
+  // printf("Starting handler thread with ID %d\n", (uint64_t) syscall(SYS_gettid));
   while (uffd_active){
     /* debug++;
-    if (debug % 10000000 == 0){
-      printf("In while \n");
+    if (debug % 100000 == 0){
+      // printf("In while from thread %ld\n", (uint64_t) syscall(SYS_gettid));
+      printf("uffd_active true from thread %ld\n",(uint64_t) syscall(SYS_gettid));
     } */
-    if (!fault_events_queue->is_empty()){
-      // std::cout << "Handling in VMM\n";
+    // printf("THREAD %ld Checking if Queue empty\n", (uint64_t) syscall(SYS_gettid));
+    // if (!fault_events_queue->is_empty()){
       // printf("Waiting on virtual_memory_manager::handler_mutex_global Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
       // const std::lock_guard<std::mutex> lock(virtual_memory_manager::handler_mutex_global);
       // printf("Aquired virtual_memory_manager::handler_mutex_global handler Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
       // if (!fault_events_queue.empty()){
         // Get and assert faulting address
+        // printf("Dequeing from thread %ld \n", (uint64_t) syscall(SYS_gettid));
         utility::fault_event fevent = fault_events_queue->dequeue();
+        if (fevent.address == 0){
+          // printf("Got address zero from thread %ld \n", (uint64_t) syscall(SYS_gettid));
+          break;
+        }
         uint64_t fault_address = fevent.address; // (uint64_t) (msg.arg.pagefault.address); // &~(m_block_size - 1));
+        // printf("Handling in VMM from thread %ld for address %ld \n", (uint64_t) syscall(SYS_gettid), fault_address);
         uint64_t start_address = (uint64_t) m_region_start_address;
         uint64_t block_index = (fault_address - start_address) / m_block_size;
         uint64_t block_address = start_address + block_index * m_block_size;
-        std::cout << "BLOCK ADDRESS: " << block_address << std::endl;
+        // std::cout << "BLOCK ADDRESS: " << block_address << std::endl;
         
         // Identify fault type
         bool is_wp_fault = fevent.is_wp_fault;
@@ -374,13 +386,14 @@ void * virtual_memory_manager::handler(){
 
         // Handling
         // std::cout << "Identifier: " << this << std::endl;
-        printf("Starting address: %ld blocks_ids address: %ld Thread ID: %ld\n", (uint64_t) m_region_start_address, (uint64_t) &blocks_ids[0], (uint64_t) syscall(SYS_gettid));
+        // printf("Starting address: %ld blocks_ids address: %ld Thread ID: %ld\n", (uint64_t) m_region_start_address, (uint64_t) &blocks_ids[0], (uint64_t) syscall(SYS_gettid));
         if (is_wp_fault){
+          // printf("Handling WP from thread %ld for address %ld \n", (uint64_t) syscall(SYS_gettid), fault_address);
           if (m_read_only){
             std::cerr << "Privateer Error: write fault on a read-only region" << std::endl;
             exit(-1);
           }
-          std::cout << "WP Fault Being Handled\n";
+          // std::cout << "WP Fault Being Handled\n";
           // Move from clean_lru to dirty_lru
           clean_lru[sub_region_index].remove((uint64_t) block_address);
           dirty_lru[sub_region_index].push_front((uint64_t) block_address);
@@ -403,31 +416,32 @@ void * virtual_memory_manager::handler(){
               exit(-1);
           }
         }
-        else{ std::cout << "BEFORO Handler 420" << std::endl;
+        else{ // std::cout << "BEFORO Handler 420" << std::endl;
           if (present_blocks[sub_region_index].find(block_address) == present_blocks[sub_region_index].end()){
-            std::cout << "Handler 420" << std::endl;
+            // std::cout << "Handler 420" << std::endl;
             evict_if_needed(sub_region_index);
             // Check if backing block exists
             int backing_block_fd = -1;
             std::string backing_block_path = ""; // printf("Handler 424 %d\n", syscall(SYS_gettid)); // std::cout << "Handler 424\n";
             std::string stash_backing_block_path = m_block_storage->get_block_stash_path(block_index); // std::cout << "Handler 425" << std::endl;
             std::string blocks_path = m_block_storage->get_blocks_path(); // std::cout << "Handler 426" << std::endl;
-            std::cout << "Handler 427" << std::endl;
+            // std::cout << "Handler 427" << std::endl;
             // std::cout << "Handler 427 DASH NEW" << std::endl;
             // std::cout << blocks_ids[block_index] << std::endl;
             // std::cout << "Handler 427 AFTER PRINT" << std::endl;
             // std::cout << "block_index = " << block_index << std::endl;
-            if (!stash_backing_block_path.empty()){ std::cout << "Handler 427 + 1" << std::endl;
-              std::cout << "Getting block: " << block_index << " from stash " << stash_backing_block_path << std::endl;
+            if (!stash_backing_block_path.empty()){ // std::cout << "Handler 427 + 1" << std::endl;
+              // std::cout << "Getting block: " << block_index << " from stash " << stash_backing_block_path << std::endl;
               backing_block_path = stash_backing_block_path;
             }  
-            else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){ std::cout << "Handler 427 + 2" << std::endl;
+            else if(blocks_ids[block_index].compare(EMPTY_BLOCK_HASH) != 0){ // std::cout << "Handler 427 + 2" << std::endl;
               // std::cout << "Getting block: " << block_index << " from blocks " << blocks_ids[block_index] << std::endl;
               backing_block_path = m_block_storage->get_block_full_path(block_index, blocks_ids[block_index]) + "/" + blocks_ids[block_index];
-            }  std::cout << "Handler 436" << std::endl;
+            }  // std::cout << "Handler 436" << std::endl;
             bool is_zero_page = false;
+            struct uffdio_copy uffdio_copy;
             if (!backing_block_path.empty()){
-              std::cout << "block exists" << std::endl;
+              // std::cout << "block exists" << std::endl;
               void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
               if (temp_buffer == MAP_FAILED){
                 std::cerr << "Error mmap temp: " << strerror(errno) << std::endl;
@@ -443,7 +457,7 @@ void * virtual_memory_manager::handler(){
               #ifdef USE_COMPRESSION
               // std::cout << "USING COMPRESSION DECOMPRESSING" << std::endl;
               // std::cout << "Backing block path: " << backing_block_path.c_str() << std::endl;
-              printf("Starting address: %ld blocks_ids address: %ld Thread ID: %ld", (uint64_t) m_region_start_address, (uint64_t) &blocks_ids[0], (uint64_t) syscall(SYS_gettid));
+              // printf("Starting address: %ld blocks_ids address: %ld Thread ID: %ld", (uint64_t) m_region_start_address, (uint64_t) &blocks_ids[0], (uint64_t) syscall(SYS_gettid));
               size_t compressed_block_size = utility::get_file_size(backing_block_path.c_str());
               void* const read_buffer = malloc(compressed_block_size);
               if (pread(backing_block_fd, read_buffer, compressed_block_size, 0) == -1){
@@ -465,11 +479,11 @@ void * virtual_memory_manager::handler(){
                 exit(-1);
               }
               
-              struct uffdio_copy uffdio_copy;
+              // struct uffdio_copy uffdio_copy;
               uffdio_copy.src = (unsigned long) temp_buffer;
               uffdio_copy.dst = (unsigned long) block_address;
               uffdio_copy.len = m_block_size;
-              uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
+              uffdio_copy.mode = UFFDIO_COPY_MODE_WP | UFFDIO_COPY_MODE_DONTWAKE;
               uffdio_copy.copy = 0;
               if (ioctl(m_uffd, UFFDIO_COPY, &uffdio_copy) == -1){
                 std::cerr << "Error ioctl-UFFDIO_COPY - " << strerror(errno) << std::endl;
@@ -487,12 +501,12 @@ void * virtual_memory_manager::handler(){
                 std::cerr << "Error mmap zero page " << strerror(errno) << std::endl;
                 exit(-1);
               }
-              printf("TEMP ADDRESS %ld blocks_ids %ld m_block_size %ld from thread %ld\n", (uint64_t) addr, (uint64_t) &blocks_ids[0], m_block_size , (uint64_t) syscall(SYS_gettid));
-              struct uffdio_copy uffdio_copy;
+              // printf("TEMP ADDRESS %ld blocks_ids %ld m_block_size %ld from thread %ld\n", (uint64_t) addr, (uint64_t) &blocks_ids[0], m_block_size , (uint64_t) syscall(SYS_gettid));
+              // struct uffdio_copy uffdio_copy;
               uffdio_copy.src = (unsigned long) addr;
               uffdio_copy.dst = (unsigned long) block_address;
               uffdio_copy.len = m_block_size;
-              uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
+              uffdio_copy.mode = UFFDIO_COPY_MODE_WP | UFFDIO_COPY_MODE_DONTWAKE;;
               uffdio_copy.copy = 0;
               if (ioctl(m_uffd, UFFDIO_COPY, &uffdio_copy) == -1){
                 std::cerr << "Error ioctl-UFFDIO_COPY for Zero page - " << strerror(errno) << std::endl;
@@ -507,14 +521,24 @@ void * virtual_memory_manager::handler(){
             }
             clean_lru[sub_region_index].push_front(block_address);
             present_blocks[sub_region_index].insert(block_address);
+            fault_events_queue->remove_processed(fevent);
+            struct uffdio_range uffdio_range;
+            uffdio_range.start = block_address;
+            uffdio_range.len = m_block_size;
+            if (ioctl(m_uffd, UFFDIO_WAKE, &uffdio_range) == -1){
+              std::cerr << "Error: ioctl-UFFDIO_WAKE - "   << strerror(errno) << std::endl;
+              exit(-1);
+            }
           }
         }
       // }
       // printf("Releasing virtual_memory_manager::handler_mutex_global handler Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
-    }
-    // std::cout << "The queue was empty\n";
+      
+      // printf("DONE Handling in VMM from thread %ld for address %ld \n", (uint64_t) syscall(SYS_gettid), fault_address);
+    // }
+    // printf("THREAD %ld Queue empty\n", (uint64_t) syscall(SYS_gettid));
   }
-  // std::cout << "THREAD QUITTING HERE" << std::endl;
+  // printf("THREAD %ld QUITTING HERE\n", (uint64_t) syscall(SYS_gettid));
   return NULL;
   // END: Poll for page fault events
   // -------------------------------
@@ -744,6 +768,13 @@ void* virtual_memory_manager::get_region_start_address(){
   return m_region_start_address;
 }
 
+uint64_t virtual_memory_manager::get_block_address(uint64_t fault_address){
+  uint64_t start_address = (uint64_t) m_region_start_address;
+  uint64_t block_index = (fault_address - start_address) / m_block_size;
+  uint64_t block_address = start_address + block_index * m_block_size;
+  return block_address;
+}
+
 size_t virtual_memory_manager::version_capacity(std::string version_path){
   // Read size path
   std::string size_string;
@@ -822,10 +853,18 @@ void virtual_memory_manager::create_version_metadata(const char* version_metadat
 
 void virtual_memory_manager::add_page_fault_event(utility::fault_event fevent){
   // printf("Waiting on virtual_memory_manager::add_event_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
-  const std::lock_guard<std::mutex> lock(virtual_memory_manager::add_event_mutex);
+  // const std::lock_guard<std::mutex> lock(virtual_memory_manager::add_event_mutex);
   // printf("Aquired virtual_memory_manager::add_event_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
-  fault_events_queue->enqueue(fevent);
+  // printf("Page Fault Event Added to queue for address %ld\n", fevent.address);
+  if (!fault_events_queue->found(fevent))
+    fault_events_queue->enqueue(fevent);
   // printf("Releasing virtual_memory_manager::add_event_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
+}
+
+void virtual_memory_manager::add_page_fault_event_all(utility::fault_event fevent){
+  for (int i = 0; i < num_handling_threads; i++){
+    add_page_fault_event(fevent);
+  }
 }
 
 void virtual_memory_manager::start_handler_thread(){
@@ -839,17 +878,25 @@ void virtual_memory_manager::start_handler_thread(){
     }
     fault_handling_threads.push_back(fault_handling_thread);
   }
+  // printf("Done creating %d handler threads\n",fault_handling_threads.size());
 }
 
 void virtual_memory_manager::stop_handler_thread(){
   // std::cout << "VMM: stop_handler_thread before pthread_join\n";
   uffd_active = false;
+  // std::this_thread::sleep_for (std::chrono::seconds(3));
+  /* for (int i = 0; i < num_handling_threads; i++){
+    add_page_fault_event({.address = 0, .is_wp_fault = false, .is_write_fault = false});
+  } */
+
   for (int i = 0; i < num_handling_threads; i++){
+    // printf("VMM: stop_handler_thread before pthread_join for thread %d\n", i);
     int status = pthread_join(fault_handling_threads[i],NULL);
     if (status != 0){
       std::cerr << "VMM: Error pthread_join - " << strerror(status) << std::endl;
       exit(-1);
     }
+    // printf("VMM: stop_handler_thread after pthread_join for thread %d\n", i);
   }
   // std::cout << "VMM: stop_handler_thread after pthread_join\n";
 }
@@ -888,6 +935,10 @@ void virtual_memory_manager::deactivate_uffd_thread(){
   /* char bye[5] = "bye";
   write(uffd_pipe[1], bye, 3); */
   // std::cout << "END: deactivate_uffd_thread" << std::endl;
+}
+
+size_t virtual_memory_manager::get_block_size(){
+  return m_block_size;
 }
 
 virtual_memory_manager::~virtual_memory_manager(){

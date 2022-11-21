@@ -20,6 +20,15 @@
 #include "fault_event.hpp"
 
 namespace utility{
+
+  struct less_than_key {
+    inline bool operator() ( const uffd_msg& lhs, const uffd_msg& rhs ) {
+      if (lhs.arg.pagefault.address == rhs.arg.pagefault.address)
+        return (lhs.arg.pagefault.flags > rhs.arg.pagefault.flags);
+      else
+        return (lhs.arg.pagefault.address < rhs.arg.pagefault.address);
+    }
+  };
   class UFFD{
     public: 
       static void init_uffd();
@@ -34,8 +43,11 @@ namespace utility{
       static std::map<uint64_t,virtual_memory_manager*> region_managers;
       static int uffd_pipe[2];
       static void* handler(void* arg);
-      static void search_and_dispatch_vmm(utility::fault_event fevent);
+      static virtual_memory_manager* search_and_dispatch_vmm(uint64_t fault_address);
       static std::atomic<int> num_handlers;
+      static int m_max_fault_events;
+      static std::vector<uffd_msg> m_events;
+      static size_t m_block_size;
   };
 
   long UFFD::m_uffd = -1;
@@ -45,6 +57,9 @@ namespace utility{
   int UFFD::uffd_pipe[2];
   pthread_t UFFD::listener_thread;
   std::atomic<int> UFFD::num_handlers = 0;
+  int UFFD::m_max_fault_events = 256;
+  std::vector<uffd_msg> UFFD::m_events;
+  size_t UFFD::m_block_size;
 
   void UFFD::init_uffd(){
     if (m_uffd == -1){
@@ -52,6 +67,8 @@ namespace utility{
       const std::lock_guard<std::mutex> lock(init_mutex);
       // printf("Aquired UFFD::init_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
       if (m_uffd == -1){
+
+        m_events.resize(m_max_fault_events);
         struct uffdio_api uffdio_api;
 
         /* Create and enable userfaultfd object. */
@@ -94,7 +111,7 @@ namespace utility{
     num_handlers--;
     const std::lock_guard<std::mutex> lock(stop_mutex);
     if (num_handlers == 0){
-      // printf("THREAD %ld Stopping UFFD\n",(uint64_t) syscall(SYS_gettid));
+      // printf("THREAD %ld Stopping UFFD listener\n",(uint64_t) syscall(SYS_gettid));
       char bye[5] = "bye";
       write(uffd_pipe[1], bye, 3);
       int err;
@@ -102,6 +119,7 @@ namespace utility{
         std::cerr << "Error: Failed to cancel main listener thread - "   << strerror(err) << std::endl;
         exit(-1);
       }
+      // std::cout << "Done stopping UFFD Listener\n";
       m_uffd = -1;
     }
   }
@@ -114,7 +132,10 @@ namespace utility{
       std::cerr << "Error: usefaultfd not initialized using UFFD::init_uffd()\n";
       exit(-1);
     }
+    // std::cout << "Registering Address: " << addr << std::endl;
     vmm->set_uffd(m_uffd);
+    m_block_size = vmm->get_block_size();
+    // std::cout << "Block size from UFFD: " << m_block_size << std::endl;
     struct uffdio_register uffdio_register;
 
     uffdio_register.range.start = (unsigned long) addr;
@@ -145,9 +166,9 @@ namespace utility{
       std::cerr << "Error: ioctl-UFFDIO_UNREGISTER - "   << strerror(errno) << std::endl;
       exit(-1);
     }
-    region_managers.erase(addr);
+    // region_managers.erase(addr);
     // printf("Releasing UFFD::unregister_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
-    vmm->deactivate_uffd_thread();
+    // vmm->deactivate_uffd_thread();
     /* int err;
     if (fault_handler_thread_pool.find(addr) == fault_handler_thread_pool.end()){
       std::cerr << "Error: Region has not been registered\n";
@@ -189,11 +210,28 @@ namespace utility{
 
       if (pollfd[1].revents & POLLIN || pollfd[2].revents & POLLIN){
         // printf("THREAD %ld Quitting\n",(uint64_t) syscall(SYS_gettid));
-        // std::cout << "POLL RECEIVED INTERNAL SIGNAL, Quitting, Bye :)" << std::endl;
+        // std::cout << "POLL RECEIVED INTERNAL SIGNAL, Quitting, Bye :)\n";
+        for (std::map<uint64_t,uint64_t>::iterator it = regions.begin(); it != regions.end(); ++it){
+          // std::cout << "FIRST\n";
+          uint64_t region_addr = it->first;
+          // std::cout << "SECOND\n";
+          uint64_t region_length = it->second;
+          // std::cout << "THIRD\n";
+          virtual_memory_manager *vmm = region_managers[region_addr];
+          // std::cout << "FOURTH\n";
+          if (vmm == nullptr){
+            // std::cout << "VMM is NULL\n";
+            exit(-1);
+          }
+          vmm->add_page_fault_event_all({.address = 0, .is_wp_fault = false, .is_write_fault = false});
+          // region_managers.erase(address);
+          // std::cout << "FIFTH\n";
+        }
+        // std::cout << "SIXTH\n";
         break;
       }
 
-      nread = read(m_uffd, &msg, sizeof(msg));
+      nread = read(m_uffd, &m_events[0], m_max_fault_events * sizeof(struct uffd_msg));
       if (nread == 0) {
           std::cerr << "EOF on userfaultfd!" << std::endl;
           exit(EXIT_FAILURE);
@@ -204,33 +242,50 @@ namespace utility{
         exit(-1);
       }
 
-      /* We expect only one kind of event; verify that assumption. */
-
-      if (msg.event != UFFD_EVENT_PAGEFAULT) {
-          std::cerr << "Unexpected event on userfaultfd" << std::endl;
-          exit(EXIT_FAILURE);
+      
+      int msgs = nread / sizeof(struct uffd_msg);
+      // printf("nread: %ld\n",nread);
+      // printf("msgs: %ld\n",msgs);
+      for (int i = 0; i < msgs; ++i){
+        virtual_memory_manager *vmm = search_and_dispatch_vmm(m_events[i].arg.pagefault.address);
+        m_events[i].arg.pagefault.address = vmm->get_block_address(m_events[i].arg.pagefault.address);
       }
-      uint64_t fault_address = (uint64_t) (msg.arg.pagefault.address);
-      bool is_wp_fault = (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP);
-      bool is_write_fault = ((!is_wp_fault) && (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE));
-      utility::fault_event fevent;
-      fevent.address = fault_address;
-      fevent.is_wp_fault = is_wp_fault;
-      fevent.is_write_fault = is_wp_fault;
-      search_and_dispatch_vmm(fevent);
+        
+
+      std::sort(&m_events[0], &m_events[msgs], less_than_key());
+
+      char* last_addr = nullptr;
+      for (int i = 0; i < msgs; ++i) {
+        struct uffd_msg msg = m_events[i];
+        if (msg.event != UFFD_EVENT_PAGEFAULT) {
+            std::cerr << "Unexpected event on userfaultfd" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        virtual_memory_manager *vmm = search_and_dispatch_vmm(msg.arg.pagefault.address);
+        uint64_t fault_address = (uint64_t) (msg.arg.pagefault.address);
+        // printf("Page Fault Event Received for address %ld\n", fault_address);
+        bool is_wp_fault = (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP);
+        bool is_write_fault = ((!is_wp_fault) && (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE));
+        utility::fault_event fevent;
+        fevent.address = fault_address;
+        fevent.is_wp_fault = is_wp_fault;
+        fevent.is_write_fault = is_wp_fault;
+        vmm->add_page_fault_event(fevent);
+      }
     }
+    // std::cout << "SEVENTH\n";
     return NULL;
   }
 
-  void UFFD::search_and_dispatch_vmm(utility::fault_event fevent){
-    uint64_t fault_address = fevent.address;
+  virtual_memory_manager* UFFD::search_and_dispatch_vmm(uint64_t fault_address){
     for (std::map<uint64_t,uint64_t>::iterator it = regions.begin(); it != regions.end(); ++it){
       uint64_t region_addr = it->first;
       uint64_t region_length = it->second;
+      // std::cout << "Searching for Address: " << fault_address << std::endl;
       if (fault_address >= region_addr && fault_address < (region_addr + region_length)){
         virtual_memory_manager *vmm = region_managers[region_addr];
-        vmm->add_page_fault_event(fevent);
-        return;
+        // vmm->add_page_fault_event(fevent);
+        return vmm;
       }
     }
     // printf("Address %ld not found for Thread ID: %ld\n", fault_address , (uint64_t) syscall(SYS_gettid));

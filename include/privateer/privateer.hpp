@@ -239,8 +239,9 @@ inline Privateer::~Privateer()
 {
   utility::UFFD::unregister_uffd_region((uint64_t)vmm->get_region_start_address(), vmm->current_region_capacity(), vmm);
   // std::cout << "Before deleting VMM\n";
-  delete vmm;
   utility::UFFD::stop_uffd();
+  delete vmm;
+  // utility::UFFD::stop_uffd();
   // std::cout << "Done stopping UFFD\n";
 }
 
