@@ -229,7 +229,7 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
   // printf("Waiting on virtual_memory_manager::handler_mutex_global open Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
   const std::lock_guard<std::mutex> lock(virtual_memory_manager::handler_mutex_global);
   // printf("Aquired virtual_memory_manager::handler_mutex_global open Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
-  // std::cout << "VMM OPENING\n";
+  std::cout << "VMM OPENING\n";
   // std::cout << "Opening :)" << std::endl;
   if (read_only){
     // std::cout << "READ ONLY!" << std::endl;

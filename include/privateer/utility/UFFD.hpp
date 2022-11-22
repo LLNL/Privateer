@@ -150,6 +150,7 @@ namespace utility{
       std::cerr << "Error registering UFFD region - Unexpected ioctl set" << std::endl;
       exit(-1);
     }
+
     regions.insert({addr, length});
     region_managers.insert({addr, vmm});
     // printf("Releasing UFFD::register_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
@@ -166,7 +167,11 @@ namespace utility{
       std::cerr << "Error: ioctl-UFFDIO_UNREGISTER - "   << strerror(errno) << std::endl;
       exit(-1);
     }
-    // region_managers.erase(addr);
+    vmm->add_page_fault_event_all({.address = 0, .is_wp_fault = false, .is_write_fault = false});
+    regions.erase(addr);
+    region_managers.erase(addr);
+    // regions[addr] = 0;
+    // region_managers[addr] = nullptr;
     // printf("Releasing UFFD::unregister_mutex Thread ID: %ld\n", (uint64_t) syscall(SYS_gettid));
     // vmm->deactivate_uffd_thread();
     /* int err;
@@ -210,23 +215,22 @@ namespace utility{
 
       if (pollfd[1].revents & POLLIN || pollfd[2].revents & POLLIN){
         // printf("THREAD %ld Quitting\n",(uint64_t) syscall(SYS_gettid));
-        // std::cout << "POLL RECEIVED INTERNAL SIGNAL, Quitting, Bye :)\n";
-        for (std::map<uint64_t,uint64_t>::iterator it = regions.begin(); it != regions.end(); ++it){
+        std::cout << "POLL RECEIVED INTERNAL SIGNAL, Quitting, Bye :)\n";
+        /* for (std::map<uint64_t,uint64_t>::iterator it = regions.begin(); it != regions.end(); ++it){
           // std::cout << "FIRST\n";
           uint64_t region_addr = it->first;
           // std::cout << "SECOND\n";
           uint64_t region_length = it->second;
           // std::cout << "THIRD\n";
-          virtual_memory_manager *vmm = region_managers[region_addr];
-          // std::cout << "FOURTH\n";
-          if (vmm == nullptr){
-            // std::cout << "VMM is NULL\n";
-            exit(-1);
+          if (region_managers[region_addr] != nullptr){
+            virtual_memory_manager *vmm = region_managers[region_addr];
+            // std::cout << "FOURTH\n";
+            
+            vmm->add_page_fault_event_all({.address = 0, .is_wp_fault = false, .is_write_fault = false});
           }
-          vmm->add_page_fault_event_all({.address = 0, .is_wp_fault = false, .is_write_fault = false});
           // region_managers.erase(address);
           // std::cout << "FIFTH\n";
-        }
+        } */
         // std::cout << "SIXTH\n";
         break;
       }
@@ -273,7 +277,7 @@ namespace utility{
         vmm->add_page_fault_event(fevent);
       }
     }
-    // std::cout << "SEVENTH\n";
+    std::cout << "RETURNING from UFFD Listener\n";
     return NULL;
   }
 
