@@ -367,9 +367,11 @@ void * virtual_memory_manager::handler(){
         // printf("Dequeing from thread %ld \n", (uint64_t) syscall(SYS_gettid));
         utility::fault_event fevent = fault_events_queue->dequeue();
         if (fevent.address == 0){
-          // printf("Got address zero from thread %ld \n", (uint64_t) syscall(SYS_gettid));
+          printf("Got address zero from thread %ld \n", (uint64_t) syscall(SYS_gettid));
           break;
         }
+
+        
         uint64_t fault_address = fevent.address; // (uint64_t) (msg.arg.pagefault.address); // &~(m_block_size - 1));
         // printf("Handling in VMM from thread %ld for address %ld \n", (uint64_t) syscall(SYS_gettid), fault_address);
         uint64_t start_address = (uint64_t) m_region_start_address;
@@ -380,10 +382,14 @@ void * virtual_memory_manager::handler(){
         // Identify fault type
         bool is_wp_fault = fevent.is_wp_fault;
         bool is_write_fault = fevent.is_write_fault;
-        int sub_region_index = fault_address % num_handling_threads;
+        int sub_region_index = block_address % num_handling_threads;
+        printf("Hello from thread %ld fault_address %ld block address %ld is_wp_fault %d\n",(uint64_t) syscall(SYS_gettid), fault_address, block_address, (int) is_wp_fault);
         /* is_wp_fault = (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP);
         is_write_fault = ((!is_wp_fault) && (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE)); */
-
+        if ((std::find(present_blocks[sub_region_index].begin(), present_blocks[sub_region_index].end(), block_address) != present_blocks[sub_region_index].end()) && !is_wp_fault){
+          std::cout << "Address found, continuing ...\n";
+          continue;
+        }
         // Handling
         // std::cout << "Identifier: " << this << std::endl;
         // printf("Starting address: %ld blocks_ids address: %ld Thread ID: %ld\n", (uint64_t) m_region_start_address, (uint64_t) &blocks_ids[0], (uint64_t) syscall(SYS_gettid));
@@ -882,7 +888,7 @@ void virtual_memory_manager::start_handler_thread(){
 }
 
 void virtual_memory_manager::stop_handler_thread(){
-  // std::cout << "VMM: stop_handler_thread before pthread_join\n";
+  std::cout << "VMM: stop_handler_thread before pthread_join\n";
   uffd_active = false;
   // std::this_thread::sleep_for (std::chrono::seconds(3));
   /* for (int i = 0; i < num_handling_threads; i++){
@@ -890,15 +896,15 @@ void virtual_memory_manager::stop_handler_thread(){
   } */
 
   for (int i = 0; i < num_handling_threads; i++){
-    // printf("VMM: stop_handler_thread before pthread_join for thread %d\n", i);
+    printf("VMM: stop_handler_thread before pthread_join for thread %d\n", i);
     int status = pthread_join(fault_handling_threads[i],NULL);
     if (status != 0){
       std::cerr << "VMM: Error pthread_join - " << strerror(status) << std::endl;
       exit(-1);
     }
-    // printf("VMM: stop_handler_thread after pthread_join for thread %d\n", i);
+    printf("VMM: stop_handler_thread after pthread_join for thread %d\n", i);
   }
-  // std::cout << "VMM: stop_handler_thread after pthread_join\n";
+  std::cout << "VMM: stop_handler_thread after pthread_join\n";
 }
 
 int virtual_memory_manager::close(){

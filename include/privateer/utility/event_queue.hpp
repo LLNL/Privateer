@@ -51,6 +51,9 @@ namespace utility{
       // bool found = (std::find(m_queue.begin(), m_queue.end(), item) != m_queue.end());
       // if (!found || (((utility::fault_event)item).address == 0)){
       m_queue.push_back(item);
+      if (! ((fault_event) item).address == 0){
+        m_processing.insert(item);
+      }
       // std::cout << "After push back\n";
       pthread_cond_signal(&m_cond);
       // }
@@ -75,9 +78,9 @@ namespace utility{
 
       auto item = m_queue.front();
       m_queue.pop_front();
-      if (! ((fault_event) item).address == 0){
+      /* if (! ((fault_event) item).address == 0){
         m_processing.insert(item);
-      }
+      } */
       
 
       pthread_mutex_unlock(&m_mutex);
