@@ -73,6 +73,7 @@ class virtual_memory_manager {
     std::vector<std::list<uint64_t>> dirty_lru; // Change to sub-regions (declaration [done], usage [done])
     std::vector<std::set<uint64_t>> stash_set; // Change to sub-regions (declaration [done], usage [done])
     std::vector<std::set<uint64_t>> present_blocks; // Change to sub-regions (declaration [done], usage [done])
+    std::vector<std::mutex> sub_regions_mutex_list;
     std::string * blocks_ids; 
     
     static const size_t FILE_GRANULARITY_DEFAULT_BYTES;
@@ -208,15 +209,18 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
     std::cerr << "Virtual Memory Manager: Error Userfaultfd pipe failed - " << strerror(errno) << std::endl;
     exit(-1);
   } */
+  sub_regions_mutex_list = std::vector<std::mutex>(num_handling_threads);
   for (int i = 0; i < num_handling_threads; i++){
     std::list<uint64_t> clean_lru_i;
     std::list<uint64_t> dirty_lru_i; 
     std::set<uint64_t> stash_set_i; 
     std::set<uint64_t> present_blocks_i; 
+    std::mutex sub_region_mutex;
     clean_lru.push_back(clean_lru_i);
     dirty_lru.push_back(dirty_lru_i);
     stash_set.push_back(stash_set_i);
     present_blocks.push_back(present_blocks_i);
+    // sub_regions_mutex_list.push_back(sub_region_mutex);
   }
   fault_events_queue = new utility::event_queue<utility::fault_event>(num_handling_threads);
   start_handler_thread();
@@ -327,15 +331,18 @@ virtual_memory_manager::virtual_memory_manager(void* addr, std::string version_m
     std::cerr << "Virtual Memory Manager: Error Userfaultfd pipe failed - " << strerror(errno) << std::endl;
     exit(-1);
   } // std::cout << "Privateer Open 304" << std::endl; */
+  sub_regions_mutex_list = std::vector<std::mutex>(num_handling_threads);
   for (int i = 0; i < num_handling_threads; i++){
     std::list<uint64_t> clean_lru_i;
     std::list<uint64_t> dirty_lru_i; 
     std::set<uint64_t> stash_set_i; 
     std::set<uint64_t> present_blocks_i; 
+    std::mutex sub_region_mutex;
     clean_lru.push_back(clean_lru_i);
     dirty_lru.push_back(dirty_lru_i);
     stash_set.push_back(stash_set_i);
     present_blocks.push_back(present_blocks_i);
+    // sub_regions_mutex_list.push_back(sub_region_mutex);
   }
   uffd_active = true;
   fault_events_queue = new utility::event_queue<utility::fault_event>(num_handling_threads);
@@ -386,6 +393,7 @@ void * virtual_memory_manager::handler(){
         printf("Hello from thread %ld fault_address %ld block address %ld is_wp_fault %d\n",(uint64_t) syscall(SYS_gettid), fault_address, block_address, (int) is_wp_fault);
         /* is_wp_fault = (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP);
         is_write_fault = ((!is_wp_fault) && (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE)); */
+        const std::lock_guard<std::mutex> lock(sub_regions_mutex_list[sub_region_index]);
         if ((std::find(present_blocks[sub_region_index].begin(), present_blocks[sub_region_index].end(), block_address) != present_blocks[sub_region_index].end()) && !is_wp_fault){
           std::cout << "Address found, continuing ...\n";
           continue;
