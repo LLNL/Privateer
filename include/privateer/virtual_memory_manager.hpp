@@ -41,6 +41,7 @@ class virtual_memory_manager {
     size_t static version_capacity(std::string version_path);
     size_t current_region_capacity();
     bool snapshot(const char* version_metadata_path);
+    size_t get_block_size();
     int close();
   private:
     void* m_region_start_address;
@@ -289,7 +290,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
   bool is_write_fault = ctx->uc_mcontext.gregs[REG_ERR] & 0x2;
   
   
-  std::cout << "HANDLING" << std::endl;
+  // std::cout << "HANDLING" << std::endl;
   if (present_blocks.find((uint64_t) block_address) != present_blocks.end()){ // Block is present in-memory (just change prot and LRU if needed)
     
     if (is_write_fault){
@@ -445,7 +446,7 @@ void virtual_memory_manager::handler(int sig, siginfo_t *si, void *ctx_void_ptr)
     }
     present_blocks.insert((uint64_t)block_address);
   }
-  std::cout << "DONE HANDLER" << std::endl;
+  // std::cout << "DONE HANDLER" << std::endl;
 }
 
 void virtual_memory_manager::evict_if_needed(){
@@ -727,6 +728,10 @@ int virtual_memory_manager::close(){
   delete m_block_storage;
   m_region_start_address = nullptr;
   return 0;
+}
+
+size_t virtual_memory_manager::get_block_size(){
+  return m_block_size;
 }
 
 virtual_memory_manager::~virtual_memory_manager(){

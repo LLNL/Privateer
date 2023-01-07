@@ -49,6 +49,7 @@ public:
   void* open_immutable(void* addr, const char* version_metadata_path,  const char* new_version_metadata_path);
   void msync();
   bool snapshot(const char* version_metadata_path);
+  size_t get_block_size();
   void* data();
   bool version_exists(const char* version_metadata_path);
   size_t region_size();
@@ -245,6 +246,10 @@ bool Privateer::snapshot(const char* version_metadata_path){
 bool Privateer::version_exists(const char* version_metadata_path){
   std::string version_full_path = base_dir_path + "/" + version_metadata_path;
   return utility::directory_exists(version_full_path.c_str());
+}
+
+size_t Privateer::get_block_size(){
+  return vmm->get_block_size();
 }
 
 inline Privateer::~Privateer()
