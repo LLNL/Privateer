@@ -4,7 +4,15 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required (VERSION 3.5.1)
-project( privateer LANGUAGES CXX C )
+project( Privateer LANGUAGES CXX C )
+
+# create config file
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+        "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in"
+        "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+        INSTALL_DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake)
+
 set (CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CXX_EXTENSIONS OFF)
