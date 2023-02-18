@@ -39,7 +39,7 @@ class virtual_memory_manager {
         std::cerr << "Error: start_address is not system-page aligned" << std::endl;
         exit(-1);
       }
-      
+
       // Set block_size
       m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
       if ( std::isnan((double)m_block_size) || m_block_size == 0){

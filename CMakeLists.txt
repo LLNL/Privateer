@@ -4,7 +4,15 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required (VERSION 3.5.1)
-project( privateer LANGUAGES CXX C )
+project( Privateer LANGUAGES CXX C )
+
+# create config file
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+        "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in"
+        "${PROJECT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
+        INSTALL_DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake)
+
 set (CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -74,29 +82,29 @@ include_directories(src)
 set(privateer_headers include/privateer/privateer_string_stream.hpp include/privateer/c_api/privateer.h include/privateer/privateer.hpp)
 set(privateer_src src/privateer_c.cpp ${privateer_headers})
 
-add_library(privateer SHARED ${privateer_src} )
+# add_library(privateer SHARED ${privateer_src} )
 add_library(privateer-static STATIC ${privateer_src} )
 
-TARGET_LINK_LIBRARIES(privateer rt)
+# TARGET_LINK_LIBRARIES(privateer rt)
 TARGET_LINK_LIBRARIES(privateer-static rt)
-TARGET_LINK_LIBRARIES(privateer OpenSSL::SSL)
+# TARGET_LINK_LIBRARIES(privateer OpenSSL::SSL)
 TARGET_LINK_LIBRARIES(privateer-static OpenSSL::SSL)
-TARGET_LINK_LIBRARIES(privateer OpenSSL::Crypto)
+# TARGET_LINK_LIBRARIES(privateer OpenSSL::Crypto)
 TARGET_LINK_LIBRARIES(privateer-static OpenSSL::Crypto)
 
 # File System
-TARGET_LINK_LIBRARIES(privateer stdc++fs)
+# TARGET_LINK_LIBRARIES(privateer stdc++fs)
 TARGET_LINK_LIBRARIES(privateer-static stdc++fs)
 
 # ZSTD
 # ------------------ZSTD----------------------------
 if (ZSTD_ROOT)
   find_library(LIBZSTD NAMES zstd PATHS ${ZSTD_ROOT}/lib)
-  target_include_directories(privateer PRIVATE ${ZSTD_ROOT}/lib)
-  target_link_libraries(privateer ${LIBZSTD})
+  # target_include_directories(privateer PRIVATE ${ZSTD_ROOT}/lib)
+  # target_link_libraries(privateer ${LIBZSTD})
   target_include_directories(privateer-static PRIVATE ${ZSTD_ROOT}/lib)
   target_link_libraries(privateer-static ${LIBZSTD})
-  target_compile_definitions(privateer PRIVATE USE_COMPRESSION)
+  # target_compile_definitions(privateer PRIVATE USE_COMPRESSION)
   target_compile_definitions(privateer-static PRIVATE USE_COMPRESSION)
 endif()
 # --------------------------------------------------
@@ -108,7 +116,7 @@ endif()
 
 set_target_properties(privateer-static PROPERTIES OUTPUT_NAME privateer)
 
-install(TARGETS  privateer privateer-static # Removed "privateer" from here
+install(TARGETS  privateer-static # Removed "privateer" from here
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
         RUNTIME DESTINATION bin )
