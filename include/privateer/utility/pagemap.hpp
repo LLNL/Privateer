@@ -34,7 +34,7 @@ namespace utility{
   } PagemapEntry;
 
 
-  PagemapEntry parse_pagemap_entry(uint64_t raw_entry){
+  inline PagemapEntry parse_pagemap_entry(uint64_t raw_entry){
     PagemapEntry entry;
     entry.pfn = raw_entry & (((uint64_t)1 << 54) - 1);
     entry.soft_dirty = (raw_entry >> 54) & 1;
@@ -44,7 +44,7 @@ namespace utility{
     return entry;
   } 
 
-  uint64_t * read_raw_pagemap(void* vaddr, size_t length){
+  inline uint64_t * read_raw_pagemap(void* vaddr, size_t length){
     int pagemap_fd = open("/proc/self/pagemap", O_RDONLY);
     if (pagemap_fd == -1){
       std::cout << "Error: Failed to open /proc/self/pagemap - " << std::endl;

@@ -71,7 +71,7 @@ endif ()
 include_directories(include)
 include_directories(src)
 
-set(privateer_headers include/privateer/c_api/privateer.h include/privateer/privateer.hpp )
+set(privateer_headers include/privateer/privateer_string_stream.hpp include/privateer/c_api/privateer.h include/privateer/privateer.hpp)
 set(privateer_src src/privateer_c.cpp ${privateer_headers})
 
 add_library(privateer SHARED ${privateer_src} )

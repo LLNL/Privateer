@@ -10,7 +10,7 @@
 #include <cmath>
 
 namespace utility{
-  size_t get_environment_variable(std::string variable_name){
+  inline size_t get_environment_variable(std::string variable_name){
     size_t value;
     char* value_c_str = std::getenv(variable_name.c_str());
     if (value_c_str == NULL){
@@ -27,7 +27,7 @@ namespace utility{
     return value;
   }
 
-  size_t get_available_memory(){ // Taken from: https://github.com/LLNL/umap/blob/develop/src/umap/Buffer.cpp#L269
+  inline size_t get_available_memory(){ // Taken from: https://github.com/LLNL/umap/blob/develop/src/umap/Buffer.cpp#L269
     uint64_t mem_avail_kb = 0;
     unsigned long mem;
     std::string token;

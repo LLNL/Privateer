@@ -10,7 +10,7 @@
 
 namespace utility{
 
-  std::string compute_hash(char* content_start, size_t content_length){
+  inline std::string compute_hash(char* content_start, size_t content_length){
     unsigned char* msg = (unsigned char*) content_start;
     unsigned char output[32];
     SHA256(msg, content_length, output);
