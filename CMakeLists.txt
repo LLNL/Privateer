@@ -82,29 +82,29 @@ include_directories(src)
 set(privateer_headers include/privateer/c_api/privateer.h include/privateer/privateer.hpp )
 set(privateer_src src/privateer_c.cpp ${privateer_headers})
 
-add_library(privateer SHARED ${privateer_src} )
+# add_library(privateer SHARED ${privateer_src} )
 add_library(privateer-static STATIC ${privateer_src} )
 
-TARGET_LINK_LIBRARIES(privateer rt)
+# TARGET_LINK_LIBRARIES(privateer rt)
 TARGET_LINK_LIBRARIES(privateer-static rt)
-TARGET_LINK_LIBRARIES(privateer OpenSSL::SSL)
+# TARGET_LINK_LIBRARIES(privateer OpenSSL::SSL)
 TARGET_LINK_LIBRARIES(privateer-static OpenSSL::SSL)
-TARGET_LINK_LIBRARIES(privateer OpenSSL::Crypto)
+# TARGET_LINK_LIBRARIES(privateer OpenSSL::Crypto)
 TARGET_LINK_LIBRARIES(privateer-static OpenSSL::Crypto)
 
 # File System
-TARGET_LINK_LIBRARIES(privateer stdc++fs)
+# TARGET_LINK_LIBRARIES(privateer stdc++fs)
 TARGET_LINK_LIBRARIES(privateer-static stdc++fs)
 
 # ZSTD
 # ------------------ZSTD----------------------------
 if (ZSTD_ROOT)
   find_library(LIBZSTD NAMES zstd PATHS ${ZSTD_ROOT}/lib)
-  target_include_directories(privateer PRIVATE ${ZSTD_ROOT}/lib)
-  target_link_libraries(privateer ${LIBZSTD})
+  # target_include_directories(privateer PRIVATE ${ZSTD_ROOT}/lib)
+  # target_link_libraries(privateer ${LIBZSTD})
   target_include_directories(privateer-static PRIVATE ${ZSTD_ROOT}/lib)
   target_link_libraries(privateer-static ${LIBZSTD})
-  target_compile_definitions(privateer PRIVATE USE_COMPRESSION)
+  # target_compile_definitions(privateer PRIVATE USE_COMPRESSION)
   target_compile_definitions(privateer-static PRIVATE USE_COMPRESSION)
 endif()
 # --------------------------------------------------
@@ -116,7 +116,7 @@ endif()
 
 set_target_properties(privateer-static PROPERTIES OUTPUT_NAME privateer)
 
-install(TARGETS  privateer privateer-static # Removed "privateer" from here
+install(TARGETS  privateer-static # Removed "privateer" from here
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
         RUNTIME DESTINATION bin )
