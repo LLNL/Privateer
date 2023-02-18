@@ -90,7 +90,7 @@ virtual_memory_manager::virtual_memory_manager(void* start_address,size_t region
   if ( std::isnan(m_block_size) || m_block_size == 0){
     size_t num_blocks = utility::get_environment_variable("PRIVATEER_NUM_BLOCKS");
     if (std::isnan(num_blocks) || num_blocks == 0){
-      std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
+      // std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
       m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
     }
     else{
