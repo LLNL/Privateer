@@ -583,7 +583,7 @@ class virtual_memory_manager {
     std::set<uint64_t> present_blocks;
     std::string *blocks_ids;
     
-    const size_t FILE_GRANULARITY_DEFAULT_BYTES = 134217728;
+    const size_t FILE_GRANULARITY_DEFAULT_BYTES = 8388608;
     const size_t MAX_MEM_DEFAULT_BLOCKS = 65536;
     const size_t HASH_SIZE = 64;
     const std::string EMPTY_BLOCK_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
