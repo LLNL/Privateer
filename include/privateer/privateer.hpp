@@ -53,6 +53,7 @@ public:
   bool version_exists(const char* version_metadata_path);
   size_t region_size();
   static size_t version_capacity(std::string version_path);
+  size_t get_block_size();
   static const int CREATE;
   static const int OPEN;
 
@@ -233,6 +234,10 @@ bool Privateer::snapshot(const char* version_metadata_path){
 bool Privateer::version_exists(const char* version_metadata_path){
   std::string version_full_path = base_dir_path + "/" + version_metadata_path;
   return utility::directory_exists(version_full_path.c_str());
+}
+
+size_t Privateer::get_block_size(){
+  return vmm->get_block_size();
 }
 
 inline Privateer::~Privateer()

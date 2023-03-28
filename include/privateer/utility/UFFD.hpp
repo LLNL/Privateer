@@ -48,6 +48,8 @@ namespace utility{
       static int m_max_fault_events;
       static std::vector<uffd_msg> m_events;
       static size_t m_block_size;
+      static std::vector<long> received_ts;
+      static std::vector<long> before_adding_ts;
   };
 
   long UFFD::m_uffd = -1;
@@ -60,6 +62,8 @@ namespace utility{
   int UFFD::m_max_fault_events = 256;
   std::vector<uffd_msg> UFFD::m_events;
   size_t UFFD::m_block_size;
+  std::vector<long> UFFD::received_ts;
+  std::vector<long> UFFD::before_adding_ts;
 
   void UFFD::init_uffd(){
     if (m_uffd == -1){
@@ -122,6 +126,20 @@ namespace utility{
       // std::cout << "Done stopping UFFD Listener\n";
       m_uffd = -1;
     }
+    /* std::vector<long>::iterator ptr;
+    for (ptr = received_ts.begin(); ptr < received_ts.end(); ptr++){
+        std::cout << "Received At:" << *ptr << std::endl;
+    }
+
+    for (ptr = before_adding_ts.begin(); ptr < before_adding_ts.end(); ptr++){
+        std::cout << "Adding At:" << *ptr << std::endl;
+    } */
+    /* received_ts.clear();
+    before_adding_ts.clear(); */
+    /* for (size_t i = 0; i < received_ts.size(); ++i){
+      std::cout << "Page fault received at: " << received_ts[i] << std::endl;
+      std::cout << "Fault added to queue at: " << received_ts[i] << std::endl;
+    } */
   }
 
   void UFFD::register_uffd_region(uint64_t addr, uint64_t length, bool read_only, virtual_memory_manager *vmm){
@@ -215,7 +233,7 @@ namespace utility{
 
       if (pollfd[1].revents & POLLIN || pollfd[2].revents & POLLIN){
         // printf("THREAD %ld Quitting\n",(uint64_t) syscall(SYS_gettid));
-        std::cout << "POLL RECEIVED INTERNAL SIGNAL, Quitting, Bye :)\n";
+        // std::cout << "POLL RECEIVED INTERNAL SIGNAL, Quitting, Bye :)\n";
         /* for (std::map<uint64_t,uint64_t>::iterator it = regions.begin(); it != regions.end(); ++it){
           // std::cout << "FIRST\n";
           uint64_t region_addr = it->first;
@@ -234,7 +252,10 @@ namespace utility{
         // std::cout << "SIXTH\n";
         break;
       }
-
+      std::chrono::time_point<std::chrono::system_clock> ts = std::chrono::system_clock::now();
+      // received_ts.push_back(std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count());
+      // std::cout << "Page Fault Recieved At: " << std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count() << std::endl;
+      // auto start = std::chrono::high_resolution_clock::now();
       nread = read(m_uffd, &m_events[0], m_max_fault_events * sizeof(struct uffd_msg));
       if (nread == 0) {
           std::cerr << "EOF on userfaultfd!" << std::endl;
@@ -250,15 +271,15 @@ namespace utility{
       int msgs = nread / sizeof(struct uffd_msg);
       // printf("nread: %ld\n",nread);
       // printf("msgs: %ld\n",msgs);
-      for (int i = 0; i < msgs; ++i){
+      /* for (int i = 0; i < msgs; ++i){
         virtual_memory_manager *vmm = search_and_dispatch_vmm(m_events[i].arg.pagefault.address);
         m_events[i].arg.pagefault.address = vmm->get_block_address(m_events[i].arg.pagefault.address);
       }
         
 
-      std::sort(&m_events[0], &m_events[msgs], less_than_key());
+      std::sort(&m_events[0], &m_events[msgs], less_than_key()); */
 
-      char* last_addr = nullptr;
+      // char* last_addr = nullptr;
       for (int i = 0; i < msgs; ++i) {
         struct uffd_msg msg = m_events[i];
         if (msg.event != UFFD_EVENT_PAGEFAULT) {
@@ -273,11 +294,17 @@ namespace utility{
         utility::fault_event fevent;
         fevent.address = fault_address;
         fevent.is_wp_fault = is_wp_fault;
-        fevent.is_write_fault = is_wp_fault;
+        fevent.is_write_fault = is_write_fault;
+        std::chrono::time_point<std::chrono::system_clock> ts = std::chrono::system_clock::now();
+        // before_adding_ts.push_back(std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count());
+        // std::cout << "Adding Fault to Queue At: " << std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count() << std::endl;
         vmm->add_page_fault_event(fevent);
       }
+      /* auto stop = std::chrono::high_resolution_clock::now();
+      auto add_time = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+      printf("Parse event took: %ld\n", add_time.count()); */
     }
-    std::cout << "RETURNING from UFFD Listener\n";
+    // std::cout << "RETURNING from UFFD Listener\n";
     return NULL;
   }
 

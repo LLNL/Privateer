@@ -9,6 +9,15 @@ namespace utility{
     template <typename T>
     class event_queue{
       public:
+        event_queue(){
+          m_max_waiting = 1;
+          m_waiting_workers = 0;
+          m_idle_waiters = 0;
+          pthread_mutex_init(&m_mutex, NULL);
+          pthread_cond_init(&m_cond, NULL);
+          pthread_cond_init(&m_idle_cond, NULL);
+        }
+
         event_queue(int max_workers){
           m_max_waiting = max_workers;
           m_waiting_workers = 0;
@@ -17,6 +26,7 @@ namespace utility{
           pthread_cond_init(&m_cond, NULL);
           pthread_cond_init(&m_idle_cond, NULL);
         }
+        
         ~event_queue(){
           // std::cout << "Closing event queue\n";
           pthread_mutex_destroy(&m_mutex);
@@ -36,7 +46,7 @@ namespace utility{
         pthread_mutex_t m_mutex;
         pthread_cond_t m_cond;
         pthread_cond_t m_idle_cond;
-        std::list<T> m_queue;
+        std::deque<T> m_queue;
         std::set<T> m_processing;
         uint64_t m_max_waiting;
         uint64_t m_waiting_workers;
