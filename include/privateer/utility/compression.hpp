@@ -17,7 +17,7 @@
 namespace utility{
     std::atomic<size_t> compression_calls = 0;
     std::atomic<size_t> decompression_calls = 0;
-    std::pair<void*,size_t> compress(void* input_buffer, size_t input_buffer_size){
+    inline std::pair<void*,size_t> compress(void* input_buffer, size_t input_buffer_size){
         compression_calls++;
         // auto begin = std::chrono::high_resolution_clock::now();
         size_t output_buffer_size_bound = ZSTD_compressBound(input_buffer_size);
@@ -33,7 +33,7 @@ namespace utility{
         return std::pair<void*,size_t>(output_buffer,output_size);
     }
 
-    size_t decompress(void* input_buffer, void* output_buffer, size_t compressed_size){
+    inline size_t decompress(void* input_buffer, void* output_buffer, size_t compressed_size){
         decompression_calls++;
         // auto begin = std::chrono::high_resolution_clock::now();
         uint64_t rSize = ZSTD_getFrameContentSize(input_buffer, compressed_size);
