@@ -25,6 +25,7 @@
 #include "utility/sha256_hash.hpp"
 #include "utility/file_util.hpp"
 #include "utility/system.hpp"
+#include "utility/s3_util.hpp"
 #ifdef USE_COMPRESSION
 #include "utility/compression.hpp"
 #endif
@@ -72,21 +73,36 @@ class block_storage
 
 
     std::string store_block(void* buffer, bool write_to_file, uint64_t block_index){
-      std::string block_hash = "";
+      std::string block_hash = utility::compute_hash((char*) buffer, block_granularity);
       bool on_stash = is_multi_tiered();
+      std::string subdirectory_name = get_blocks_subdirectory(block_hash, on_stash);
       if (on_stash){
-        std::string block_hash = store_block(buffer, write_to_file, block_index, true, "");
+        std::string block_hash = store_block(buffer, write_to_file, block_index, true, block_hash, subdirectory_name);
         if (block_hash.empty()){
           std::cerr << "block_storage: Error storing block with index: " << block_index << std::endl;
           return block_hash;
         }
         on_stash = false;
+        // Copy to base
+        // if (is_s3){
+          std::string src = subdirectory_name + block_hash;
+          std::string dest = utility::s3_util::bucket + "/" + subdirectory_name.substr(subdirectory_name.rfind("/") + 1) + block_hash;
+          if (!utility::s3_util::copy_file(src.c_str(), dest.c_str())){
+            std::cerr << "Block Storage - S3 copy error, exiting ...." << std::endl;
+            exit(-1);
+          }
+        // }
+        /* else{
+          utility::copy_file();
+        } */
       }
-      std::string block_hash_final = store_block(buffer, write_to_file, block_index, on_stash, block_hash);
-      if (!block_hash_final.empty()){
-        stash_committed_block_ids.insert(std::pair<uint64_t,std::string>(block_index, block_hash));
+      else{
+        std::string block_hash_final = store_block(buffer, write_to_file, block_index, on_stash, block_hash, subdirectory_name);
+        if (!block_hash_final.empty()){
+          stash_committed_block_ids.insert(std::pair<uint64_t,std::string>(block_index, block_hash));
+        }
       }
-      return block_hash_final;
+      return block_hash;
     }
 
     bool stash_block(void* block_start, uint64_t block_index){
@@ -233,8 +249,8 @@ class block_storage
         std::string stash_subdir =  get_blocks_subdirectory(block_hash, true);
         if (stash_committed_block_ids.find(block_index) == stash_committed_block_ids.end()){
           std::string stash_block_path = stash_subdir + "/" + block_hash;
-          std::string base_block_path = base_subdir + "/" + block_hash;
-          if (!copy_to_stash(base_block_path, stash_block_path)){
+          std::string base_block_path = utility::s3_util::bucket + "/" + base_subdir.substr(base_subdir.rfind("/") + 1) + "/" + block_hash;
+          if (!utility::s3_util::copy_file(base_block_path.c_str(), stash_block_path.c_str()) /* copy_to_stash(base_block_path, stash_block_path*/){
             std::cerr << "block_storage: Error copying block with index: " << block_index << " and ID: " << block_hash << " From base directory to stash directory" << std::endl;
             exit(-1);
           } // TODO: Copy only the file not all dir.
@@ -367,15 +383,8 @@ class block_storage
       return subdir_name;
     }
 
-    std::string store_block(void* buffer, bool write_to_file, uint64_t block_index, bool on_stash, std::string pre_computed_hash){
+    std::string store_block(void* buffer, bool write_to_file, uint64_t block_index, bool on_stash, std::string block_hash, std::string subdirectory_name){
       // std::cout << "BLOCK FD: " << block_fd << " Process ID: " << getpid() << std::endl;
-
-      std::string block_hash = pre_computed_hash;
-      if (block_hash.empty()){
-        block_hash = utility::compute_hash((char*) buffer, block_granularity);
-      }
-
-      std::string subdirectory_name = get_blocks_subdirectory(block_hash, on_stash);
 
       std::string temporary_file_name_template = std::to_string(block_index) + "_temp_XXXXXX";
       char* name_template = (char*) temporary_file_name_template.c_str();
@@ -524,6 +533,7 @@ class block_storage
     std::mutex create_block_directory_mutex;
     size_t num_subdirs = 1024;
     size_t hash_prefix_length = 6;
+    bool is_s3 = true;
     // std::atomic<size_t> num_files = 0;
 };
 
