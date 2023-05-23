@@ -291,13 +291,13 @@ class virtual_memory_manager {
       // std::cout << "thread: " << omp_get_thread_num() << " Faulted on block: " << (block_index % num_locks) << std::endl;
       // const std::lock_guard<std::mutex> lock(blocks_locks[block_index]); // lock(blocks_locks[block_index % num_locks]);
       // std::cout << "thread: " << omp_get_thread_num() << " grabbed lock number: " << (block_index % num_locks) << std::endl;
-      if (fault_address < (uint64_t) start_address || fault_address >= (uint64_t) start_address + m_region_max_capacity){
+      /* if (fault_address < (uint64_t) start_address || fault_address >= (uint64_t) start_address + m_region_max_capacity){
         std::cerr << "Error: Faulting address out of range" << std::endl;
         std::cerr << "Faulting Address: " << (uint64_t) fault_address << std::endl;
         std::cerr << "Start:            " << (uint64_t) start_address << std::endl;
         std::cerr << "End:              " << (uint64_t) start_address + m_region_max_capacity << std::endl;
         exit(-1);
-      }
+      } */
       
       // Handle block fault
       ucontext_t *ctx = (ucontext_t *) ctx_void_ptr;
