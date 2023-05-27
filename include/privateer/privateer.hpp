@@ -121,6 +121,7 @@ public:
       std::cerr << "Error: reset sigaction failed" << std::endl;
       exit(-1);
     }
+    utility::sigsegv_handler_dispatcher::remove_virtual_memory_manager((uint64_t) vmm->get_region_start_address());
     delete vmm;
   }
 
@@ -250,30 +251,6 @@ private:
   size_t file_granularity;
   virtual_memory_manager* vmm;
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 inline size_t Privateer::region_size(){
   return vmm->current_region_capacity();

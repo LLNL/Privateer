@@ -145,7 +145,7 @@ class virtual_memory_manager {
       // std::cout << "blocks_dir_path = "<< blocks_dir_path << std::endl;
       m_block_storage = new block_storage(blocks_dir_path, stash_path);
       m_block_size = m_block_storage->get_block_granularity();
-      
+      std::cerr << "m_block_size from vmm->open() = " << m_block_size << std::endl;
       std::string metadata_file_name = std::string(m_version_metadata_path) + "/_metadata";
       int flags = read_only? O_RDONLY: O_RDWR;
       int metadata_fd = ::open(metadata_file_name.c_str(), flags, (mode_t) 0666);
@@ -282,7 +282,7 @@ class virtual_memory_manager {
     }
 
     void handler(int sig, siginfo_t *si, void *ctx_void_ptr){
-      const std::lock_guard<std::mutex> lock(sig_handler_mutex);
+      // const std::lock_guard<std::mutex> lock(sig_handler_mutex);
       // Get and assert faulting address
       uint64_t fault_address = (uint64_t) si->si_addr;
       uint64_t start_address = (uint64_t) m_region_start_address;
@@ -298,13 +298,11 @@ class virtual_memory_manager {
         std::cerr << "End:              " << (uint64_t) start_address + m_region_max_capacity << std::endl;
         exit(-1);
       } */
-      
       // Handle block fault
       ucontext_t *ctx = (ucontext_t *) ctx_void_ptr;
       bool is_write_fault = ctx->uc_mcontext.gregs[REG_ERR] & 0x2;
       
       
-      // std::cout << "HANDLING" << std::endl;
       if (present_blocks.find((uint64_t) block_address) != present_blocks.end()){ // Block is present in-memory (just change prot and LRU if needed)
         
         if (is_write_fault){
@@ -369,7 +367,7 @@ class virtual_memory_manager {
           // mmap temporary location
           void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
           #else
-          // std::cout << "On Linux, using mremap" << std::endl;
+          
           void* temp_buffer =  mmap(nullptr, m_block_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
           #endif
           if (temp_buffer == MAP_FAILED){
@@ -394,7 +392,7 @@ class virtual_memory_manager {
           size_t decompressed_size = utility::decompress(read_buffer, temp_buffer, compressed_block_size);
           free(read_buffer);
           #else
-          // std::cout << "NOT USING COMPRESSION" << std::endl;
+          
           if (pread(backing_block_fd, temp_buffer, m_block_size, 0) == -1){
             std::cerr << "virtual_memory_manager: Error reading backing block: " << backing_block_path << " for address: " << " - " << strerror(errno) << block_address << std::endl;
             exit(-1);
