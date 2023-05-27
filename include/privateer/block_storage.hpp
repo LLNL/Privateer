@@ -202,7 +202,8 @@ class block_storage
             stash_block_ids.erase(block_index);
             if (is_multi_tiered()){
               // storing to only base_directory since stash has already been stored
-              block_hash = store_block(temp_buffer, true, block_index, false, block_hash);
+              std::string subdirectory_name = get_blocks_subdirectory(block_hash, false);
+              block_hash = store_block(temp_buffer, true, block_index, false, block_hash, subdirectory_name);
               if (block_hash.empty()){
                 std::cerr << "block_storage: Error committing stash block with index: " << block_index << " to base path" << std::endl;
                 return "";
@@ -218,7 +219,8 @@ class block_storage
           }
         }
         else{
-          block_hash = store_block(temp_buffer, true, block_index, false, block_hash);
+          std::string subdirectory_name = get_blocks_subdirectory(block_hash, false);
+          block_hash = store_block(temp_buffer, true, block_index, false, block_hash, subdirectory_name);
           if (block_hash.empty()){
             std::cerr << "block_storage: Error committing stash block with index: " << block_index << " to base path" << std::endl;
             return "";
@@ -233,7 +235,8 @@ class block_storage
           std::cerr << "block_storage: Error removing stash file" << std::endl;
           return "";
         }
-        block_hash = store_block(temp_buffer, true, block_index, false, block_hash);
+        std::string subdirectory_name = get_blocks_subdirectory(block_hash, false);
+        block_hash = store_block(temp_buffer, true, block_index, false, block_hash, subdirectory_name);
         if (block_hash.empty()){
           std::cerr << "block_storage: Error committing stash block with index: " << block_index << " to base path" << std::endl;
           return "";
@@ -317,11 +320,22 @@ class block_storage
           std::cerr << "Error: Failed to create blocks directory" << std::endl;
           exit(-1);
         }
+
+        std::string tmp_granularity_file = "/tmp/_granularity";
         std::string granularity_file_name = base_directory + "/_granularity";
+
         std::ofstream granularity_file;
-        granularity_file.open(granularity_file_name);
+        granularity_file.open(tmp_granularity_file);
         granularity_file << block_granularity;
         granularity_file.close();
+
+        // Copy to S3
+        std::string src = tmp_granularity_file;
+        std::string dest = granularity_file_name;
+        if (!utility::s3_util::copy_file(src.c_str(), dest.c_str())){
+          std::cerr << "Block Storage - S3 copy error, exiting ...." << std::endl;
+          exit(-1);
+        }
       }
       /* else{
         std::cerr << "block_storage: Error - Blocks directory already exists" << std::endl;
@@ -352,12 +366,23 @@ class block_storage
 
       std::string granularity_string;
       std::string granularity_file_name = base_directory + "/_granularity";
+      std::string tmp_granularity_file = "/tmp/_granularity";
+
+      // Copy from S3
+      std::string src = granularity_file_name;
+      std::string dest = tmp_granularity_file;
+      if (!utility::s3_util::copy_file(src.c_str(), dest.c_str())){
+        std::cerr << "Block Storage - S3 copy error, exiting ...." << std::endl;
+        exit(-1);
+      }
+
       std::ifstream granularity_file;
-      granularity_file.open(granularity_file_name);
+      granularity_file.open(tmp_granularity_file);
       if (!granularity_file.is_open()){
         std::cerr << "block_storage: Error opening block granularity metadata"<< std::endl;
         exit(-1);
       }
+
       if (!std::getline(granularity_file, granularity_string)){
         std::cerr << "block_storage: Error reading block granularity metadata"<< std::endl;
         exit(-1);
