@@ -121,13 +121,14 @@ public:
       std::cerr << "Error: reset sigaction failed" << std::endl;
       exit(-1);
     }
+    utility::sigsegv_handler_dispatcher::remove_virtual_memory_manager((uint64_t) vmm->get_region_start_address());
     delete vmm;
   }
 
   void* create(void* addr, const char* version_metadata_path, size_t region_size, bool allow_overwrite){
     std::string version_metadata_full_path = base_dir_path + "/" + version_metadata_path;
     vmm = new virtual_memory_manager(addr, region_size, version_metadata_full_path, blocks_dir_path, stash_dir_path, allow_overwrite);
-    utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
+    utility::sigsegv_handler_dispatcher::add_virtual_memory_manager((uint64_t) vmm->get_region_start_address(), region_size, vmm);
     struct sigaction sa;
     sa.sa_flags = SA_SIGINFO;
     sigemptyset(&sa.sa_mask);
@@ -229,7 +230,7 @@ private:
     version_metadata_dir_path = version_metadata_full_path;
     vmm = new virtual_memory_manager(addr, version_metadata_dir_path, stash_dir_path, read_only);
     // std::cout << "HELLO FROM PRIVATEER OPEN 3" << std::endl;
-    utility::sigsegv_handler_dispatcher::set_virtual_memory_manager(vmm);
+    utility::sigsegv_handler_dispatcher::add_virtual_memory_manager((uint64_t) vmm->get_region_start_address(), vmm->current_region_capacity(), vmm);
     struct sigaction sa;
     sa.sa_flags = SA_SIGINFO;
     sigemptyset(&sa.sa_mask);
@@ -250,30 +251,6 @@ private:
   size_t file_granularity;
   virtual_memory_manager* vmm;
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 inline size_t Privateer::region_size(){
   return vmm->current_region_capacity();
