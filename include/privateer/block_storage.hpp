@@ -314,13 +314,17 @@ class block_storage
       //  if (!utility::directory_exists(base_directory_path.c_str())){
       // Grab mutex
       // std::lock_guard<std::mutex> create_blocks_dir_lock(create_block_directory_mutex);
-      if (!utility::directory_exists(base_directory_path.c_str())){
-        // create blocks directory and save block_granularity in _metadata
-        if (!utility::create_directory(base_directory.c_str())){
-          std::cerr << "Error: Failed to create blocks directory" << std::endl;
-          exit(-1);
+      if (!is_s3){
+        if (!utility::directory_exists(base_directory_path.c_str())){
+          // create blocks directory and save block_granularity in _metadata
+          if (!utility::create_directory(base_directory.c_str())){
+            std::cerr << "Error: Failed to create blocks directory" << std::endl;
+            exit(-1);
+          }
         }
-
+        // TODO: Create and write granularity file
+      }
+      else{
         std::string tmp_granularity_file = "/tmp/_granularity";
         std::string granularity_file_name = base_directory + "/_granularity";
 

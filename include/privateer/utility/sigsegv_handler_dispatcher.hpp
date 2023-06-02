@@ -21,6 +21,7 @@ namespace utility{
 
       inline static void handler(int sig, siginfo_t *si, void *ctx_void_ptr){
         std::lock_guard<std::mutex> region_manager_remove_lock(region_manager_handler_mutex);
+        std::cout << "FAULT Received" << std::endl;
         // Get address information
         uint64_t fault_address = (uint64_t) si->si_addr;
         virtual_memory_manager *vmm;

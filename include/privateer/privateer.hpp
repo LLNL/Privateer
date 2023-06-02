@@ -49,8 +49,14 @@ public:
         exit(-1); */
         std::cerr << "Using existing Privateer root dir at: " << base_path << std::endl;
         base_dir_path = std::string(base_path);
-        blocks_dir_path = std::string(base_path) + "/" + "blocks";
-        stash_dir_path = std::string(base_path) + "/" + "stash";
+        blocks_dir_path = utility::get_environment_variable_string("PRIVATEER_BLOCKS_PATH");
+        if (blocks_dir_path.empty()){
+          blocks_dir_path = std::string(base_path) + "/" + "blocks";
+        }
+        stash_dir_path = utility::get_environment_variable_string("PRIVATEER_STASH_PATH");
+        if (stash_dir_path.empty()){
+          stash_dir_path = std::string(base_path) + "/" + "stash";
+        }
         return;
       }
       if (!utility::create_directory(base_path)){
@@ -65,8 +71,18 @@ public:
       exit(-1);
     }
     base_dir_path = std::string(base_path);
-    blocks_dir_path = std::string(base_path) + "/" + "blocks";
-    stash_dir_path = std::string(base_path) + "/" + "stash";
+    blocks_dir_path = utility::get_environment_variable_string("PRIVATEER_BLOCKS_PATH");
+    if (blocks_dir_path.empty()){
+      blocks_dir_path = std::string(base_path) + "/" + "blocks";
+    }
+    stash_dir_path = utility::get_environment_variable_string("PRIVATEER_STASH_PATH");
+    if (stash_dir_path.empty()){
+      stash_dir_path = std::string(base_path) + "/" + "stash";
+    }
+
+    std::cout << "PRIVATEER BASE: " << base_dir_path << std::endl;
+    std::cout << "PRIVATEER STASH: " << stash_dir_path << std::endl;
+    std::cout << "PRIVATEER BLOCKS: " << blocks_dir_path << std::endl;
   }
   
   Privateer(int action, const char* base_path, const char* stash_base_path){
@@ -244,9 +260,9 @@ private:
   }
 
   std::string EMPTY_BLOCK_HASH;
-  std::string base_dir_path;
-  std::string blocks_dir_path;
-  std::string stash_dir_path;
+  std::string base_dir_path = "";
+  std::string blocks_dir_path = "";
+  std::string stash_dir_path = "";
   std::string version_metadata_dir_path;
   size_t file_granularity;
   virtual_memory_manager* vmm;

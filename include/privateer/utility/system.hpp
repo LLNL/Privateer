@@ -10,7 +10,7 @@
 #include <cmath>
 
 namespace utility{
-  inline size_t get_environment_variable(std::string variable_name){
+  inline size_t get_environment_variable_long(std::string variable_name){
     size_t value;
     char* value_c_str = std::getenv(variable_name.c_str());
     if (value_c_str == NULL){
@@ -23,6 +23,18 @@ namespace utility{
       catch (const std::invalid_argument& ia){
         value = (size_t) NAN;
       }
+    }
+    return value;
+  }
+
+  inline std::string get_environment_variable_string(std::string variable_name){
+    std::string value;
+    char* value_c_str = std::getenv(variable_name.c_str());
+    if (value_c_str == NULL){
+      value = "";
+    }
+    else{
+      value = std::string(value_c_str);
     }
     return value;
   }

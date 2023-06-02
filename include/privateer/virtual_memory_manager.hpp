@@ -41,9 +41,9 @@ class virtual_memory_manager {
       }
 
       // Set block_size
-      m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
+      m_block_size = utility::get_environment_variable_long("PRIVATEER_BLOCK_SIZE");
       if ( std::isnan((double)m_block_size) || m_block_size == 0){
-        size_t num_blocks = utility::get_environment_variable("PRIVATEER_NUM_BLOCKS");
+        size_t num_blocks = utility::get_environment_variable_long("PRIVATEER_NUM_BLOCKS");
         if (std::isnan((double) num_blocks) || num_blocks == 0){
           // std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
           m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
@@ -80,7 +80,7 @@ class virtual_memory_manager {
         } */
       }
 
-      size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
+      size_t max_mem_size_blocks = utility::get_environment_variable_long("PRIVATEER_MAX_MEM_BLOCKS");
       if ( std::isnan((double)max_mem_size_blocks) || max_mem_size_blocks == 0){
         max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
       }
@@ -201,7 +201,7 @@ class virtual_memory_manager {
       delete [] metadata_content;
       
 
-      size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
+      size_t max_mem_size_blocks = utility::get_environment_variable_long("PRIVATEER_MAX_MEM_BLOCKS");
       if ( std::isnan((double)max_mem_size_blocks) || max_mem_size_blocks == 0){
         max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
       }
@@ -325,7 +325,7 @@ class virtual_memory_manager {
         }
       }
       else{ // block is not present in-memory
-        
+        std::cout << "Non-present block fault" << std::endl;
         evict_if_needed();
         
         int prot = is_write_fault ? PROT_WRITE : PROT_READ;
@@ -444,6 +444,7 @@ class virtual_memory_manager {
           }
         }
         else{ // No backing block yet, just change mprotect
+          std::cout << "No backing block yet! block size: " << m_block_size << std::endl;
           if (mprotect((void*) block_address, m_block_size, prot) == -1){
             std::cerr << "virtual_memory_manager: Error changing PROT for block: " << block_address << " - " << strerror(errno) << std::endl;
             exit(-1);

@@ -9,7 +9,7 @@ namespace utility{
     class s3_util{
         public:
             inline static bool copy_file(const char * source, const char * dest){
-                std::string cmd = "aws s3 --endpoint-url" + endpoint + " cp " + source + " " + dest;
+                std::string cmd = "aws s3 --endpoint-url " + endpoint + " cp " + source + " " + dest;
                 return exec(cmd.c_str());
             }
  
