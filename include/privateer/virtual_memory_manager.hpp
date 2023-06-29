@@ -145,7 +145,6 @@ class virtual_memory_manager {
       // std::cout << "blocks_dir_path = "<< blocks_dir_path << std::endl;
       m_block_storage = new block_storage(blocks_dir_path, stash_path);
       m_block_size = m_block_storage->get_block_granularity();
-      std::cerr << "m_block_size from vmm->open() = " << m_block_size << std::endl;
       std::string metadata_file_name = std::string(m_version_metadata_path) + "/_metadata";
       int flags = read_only? O_RDONLY: O_RDWR;
       int metadata_fd = ::open(metadata_file_name.c_str(), flags, (mode_t) 0666);

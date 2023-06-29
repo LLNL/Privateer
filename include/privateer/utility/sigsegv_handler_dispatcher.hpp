@@ -8,7 +8,6 @@ namespace utility{
     public:
       inline static void add_virtual_memory_manager(uint64_t addr, uint64_t length, virtual_memory_manager* vmm){
         std::lock_guard<std::mutex> region_manager_add_lock(region_manager_add_mutex);
-        std::cerr << "Adding VMM for region: " << addr << std::endl;
         regions.insert({addr, length});
         region_managers.insert({addr, vmm});
       }
@@ -32,9 +31,7 @@ namespace utility{
           // std::cout << "Searching for Address: " << fault_address << std::endl;
           if (fault_address >= region_addr && fault_address < (region_addr + region_length)){
             vmm = region_managers[region_addr];
-            std::cerr << "REGION FOUND" << std::endl;
             vmm->handler(sig, si, ctx_void_ptr);
-            std::cerr << "Fault Processed" << std::endl;
             return;
           }
         }
