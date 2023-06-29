@@ -304,7 +304,7 @@ class block_storage
         }
       }
       // std::cout << "block_storage: Base directory path arg = " << base_directory_path << std::endl;
-      base_directory = base_directory_path;
+      base_directory = "s3://cz-youssef2"; // base_directory_path;
       // std::cout << "block_storage: Base directory path = " << base_directory << std::endl;
 
       stash_directory = stash_directory_path;
@@ -363,7 +363,7 @@ class block_storage
         exit(-1);
       }
       // std::cout << "block_storage: Base directory path arg = " << base_directory_path << std::endl;
-      base_directory = base_directory_path;
+      base_directory = "s3://cz-youssef2"; // base_directory_path;
       // std::cout << "block_storage: Base directory path = " << base_directory << std::endl;
 
       stash_directory = stash_directory_path;
