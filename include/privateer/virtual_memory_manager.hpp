@@ -494,24 +494,27 @@ class virtual_memory_manager {
     }
 
     bool snapshot(const char* version_metadata_path){
-      // std::cout << "Snapshot path: " << version_metadata_path  << std::endl;
+
+      std::string snapshot_metadata_path = std::string(version_metadata_path) + "/_metadata";
+      std::string m_temp_current_metadata_path = m_version_metadata_path;
+
       // Create new version metadata directory
       if(utility::directory_exists(version_metadata_path)){
-        std::cerr << "Error: Version metadata directory already exists" << std::endl;
-        return false;
+        if (utility::file_exists(snapshot_metadata_path.c_str())){
+          std::cerr << "Error: Version metadata directory already exists" << std::endl;
+          return false;
+        }
       }
 
-      if (!utility::create_directory(version_metadata_path)){
+      else if (!utility::create_directory(version_metadata_path)){
         std::cerr << "Error: Failed to create version metadata directory at " << version_metadata_path << " - " << strerror(errno) << std::endl;
+        return false;
       }
 
       // temporarily change metadata file descriptor
       // int temp_metada_fd = metadata_fd;
-      std::string snapshot_metadata_path = std::string(version_metadata_path) + "/_metadata";
-      std::string m_temp_current_metadata_path = m_version_metadata_path;
       m_version_metadata_path = std::string(version_metadata_path);
-      // std::cout << "Privateer: Snapshotting to " << snapshot_metadata_path << std::endl;
-      // TODO: Add check or create in a different way
+
       int metadata_fd = ::open(snapshot_metadata_path.c_str(), O_RDWR | O_CREAT, (mode_t) 0666);
       int close_status = ::close(metadata_fd);
       
@@ -525,14 +528,6 @@ class virtual_memory_manager {
       blocks_path_file.open(blocks_path_file_name);
       blocks_path_file << m_block_storage->get_blocks_path();
       blocks_path_file.close();
-
-      // Create file to save current size
-      /* std::string size_path_file_name = std::string(version_metadata_path) + "/_size";
-      std::ofstream size_path_file;
-      size_path_file.open(size_path_file_name);
-      size_path_file << m_current_size;
-      size_path_file.close(); */
-
 
       // Create file to save max. capacity
       std::string capacity_path_file_name = std::string(version_metadata_path) + "/_capacity";
