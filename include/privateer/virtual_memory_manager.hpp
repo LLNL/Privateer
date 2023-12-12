@@ -129,6 +129,7 @@ class virtual_memory_manager {
     }
 
     virtual_memory_manager(void* addr, std::string version_metadata_path, std::string stash_path, bool read_only){
+
       m_version_metadata_path = version_metadata_path;
       // Read blocks path
       std::string blocks_path_file_name = std::string(m_version_metadata_path) + "/_blocks_path";
