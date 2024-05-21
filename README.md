@@ -16,7 +16,15 @@ Privateer consists of header files that are included under privateer/include/pri
 
 ## Building Privateer
 
-To build an application that uses Privateer, add the Privateer headers path to the include path using "-I" compliler option or CPLUS_INCLUDE_PATH.
+* To build an application that uses Privateer, add the Privateer headers path to the include path using "-I" compliler option or CPLUS_INCLUDE_PATH.
+
+* To build Privateer as a shared library:
+```bash
+git clone git@github.com:LLNL/Privateer.git
+cd Privateer
+mkdir build && cd build
+cmake -DZSTD_ROOT=<path_to_zstd> -DBOOST_ROOT=<path_to_boost> -DCMAKE_INSTALL_PREFIX=. ..
+```
 
 ## Building and Running Test Examples
 
