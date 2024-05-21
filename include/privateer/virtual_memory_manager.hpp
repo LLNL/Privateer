@@ -31,7 +31,7 @@
 
 class virtual_memory_manager {
   public:
-    virtual_memory_manager(void* start_address, size_t region_max_capacity, 
+    virtual_memory_manager(void* start_address, size_t region_max_capacity, size_t block_size,
                                                     std::string version_metadata_path, std::string blocks_path, std::string stash_path, bool allow_overwrite){
       // Verify system page alignment
       size_t pagesize = sysconf(_SC_PAGE_SIZE);
@@ -40,30 +40,21 @@ class virtual_memory_manager {
         exit(-1);
       }
 
-      // Set block_size
-      m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
-      if ( std::isnan((double)m_block_size) || m_block_size == 0){
-        size_t num_blocks = utility::get_environment_variable("PRIVATEER_NUM_BLOCKS");
-        if (std::isnan((double) num_blocks) || num_blocks == 0){
-          // std::cout << "Setting Privateer block size to default of : " << FILE_GRANULARITY_DEFAULT_BYTES << " bytes." << std::endl;
-          m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
-        }
-        else{
-          if (region_max_capacity % num_blocks == 0){
-            m_block_size = region_max_capacity / num_blocks;
-          }
-          else{
-            std::cerr << "PRIVATEER_NUM_BLOCKS is set, but region capacity is not divisible by it "<< std::endl;
-            exit(-1);
-          }
-        }
+      /* if (region_max_capacity % num_blocks == 0){
+        m_block_size = region_max_capacity / num_blocks;
       }
+      else{
+        std::cerr << "PRIVATEER_NUM_BLOCKS is set, but region capacity is not divisible by it "<< std::endl;
+        exit(-1);
+      } */
+        
       // Verify multiple of system's page size
-      if (m_block_size % pagesize != 0){
+      /* if (m_block_size % pagesize != 0){
         std::cerr << "Error: block_size must be multiple of system page size (" << pagesize << ")" << std::endl;
         exit(-1);
-      }
+      } */
       // Verity region capacity is multiple of block size
+      m_block_size = block_size;
       if (region_max_capacity % m_block_size != 0 && region_max_capacity != 0){
         // Round capacity to nearest larger multiple of block size
         region_max_capacity = ((region_max_capacity / m_block_size) + 1) * m_block_size;
@@ -79,7 +70,6 @@ class virtual_memory_manager {
           m_block_size = region_max_capacity;
         } */
       }
-
       size_t max_mem_size_blocks = utility::get_environment_variable("PRIVATEER_MAX_MEM_BLOCKS");
       if ( std::isnan((double)max_mem_size_blocks) || max_mem_size_blocks == 0){
         max_mem_size_blocks = MAX_MEM_DEFAULT_BLOCKS;
@@ -90,7 +80,6 @@ class virtual_memory_manager {
       // m_block_size = block_size;
       m_region_max_capacity = region_max_capacity;
       m_max_mem_size = max_mem_size_blocks * m_block_size;
-      // std::cout << "m_max_mem_size = " << m_max_mem_size << std::endl;
       m_version_metadata_path = version_metadata_path;
 
       m_block_storage = new block_storage(blocks_path, stash_path, m_block_size);
@@ -143,7 +132,6 @@ class virtual_memory_manager {
       if (!std::getline(blocks_path_file, blocks_dir_path)){
         std::cerr << "Error reading blocks path file" << std::endl;
       } 
-      // std::cout << "blocks_dir_path = "<< blocks_dir_path << std::endl;
       m_block_storage = new block_storage(blocks_dir_path, stash_path);
       m_block_size = m_block_storage->get_block_granularity();
       std::string metadata_file_name = std::string(m_version_metadata_path) + "/_metadata";
@@ -170,7 +158,7 @@ class virtual_memory_manager {
         exit(-1);
       }
       
-      // std::cout << "num_blocks: " << num_blocks << std::endl;
+      
       blocks_ids = new std::string[num_blocks];
       char* metadata_content = new char[metadata_size];
       size_t read = ::pread(metadata_fd, (void*) metadata_content, metadata_size, 0);
@@ -182,21 +170,16 @@ class virtual_memory_manager {
       std::string all_hashes(metadata_content, metadata_size);
       
       uint64_t offset = 0;
-      // std::cout << "Privateer: Metadata size = " << metadata_size  << std::endl;
       for (size_t i = 0; i < metadata_size; i += HASH_SIZE){
-        // std::cout << "Privateer: Initializing blocks and regions, iteration no. " << i << std::endl;
-        // std::cout << "blocks_ids_index: " << (i / HASH_SIZE) << std::endl;
         std::string block_hash(all_hashes, i, HASH_SIZE);
         blocks_ids[i / HASH_SIZE] = block_hash;
       }
       
       size_t num_occupied_blocks = metadata_size / HASH_SIZE;
       for (size_t i = num_occupied_blocks; i < num_blocks; i++){
-        // std::cout << "blocks_ids_index Next: " << i << std::endl;
         blocks_ids[i] = EMPTY_BLOCK_HASH;
       }
 
-      // blocks_locks = new std::mutex[num_blocks];
       
       delete [] metadata_content;
       
@@ -223,7 +206,6 @@ class virtual_memory_manager {
 
     void msync(){
       // 1) Write dirty_lru
-      // std::cout << "size of dirty LRU: "<< dirty_lru.size() << std::endl;
       std::vector<uint64_t> dirty_lru_vector(dirty_lru.begin(), dirty_lru.end());
       #pragma omp parallel for
       for (auto dirty_lru_iterator = dirty_lru_vector.begin(); dirty_lru_iterator != dirty_lru_vector.end(); ++dirty_lru_iterator){
@@ -254,7 +236,6 @@ class virtual_memory_manager {
       dirty_lru.clear();
       
       // 2) Commit stashed blocks
-      // std::cout << "SIZE OF STASH SET: " << stash_set.size() << std::endl;
       std::vector<uint64_t> stash_vector(stash_set.begin(), stash_set.end());
       #pragma omp parallel for
       for (auto stash_iterator = stash_vector.begin(); stash_iterator != stash_vector.end(); ++stash_iterator){
@@ -275,9 +256,7 @@ class virtual_memory_manager {
       update_metadata();
       struct stat st_dev_null;
       if (fstat(0,&st_dev_null) != 0){
-        // std::cout << "Opening /dev/null" << std::endl;
         int dev_null_fd = ::open("/dev/null",O_RDWR);
-        // std::cout << "/dev/null FD: " << dev_null_fd << std::endl;
       }
     }
 
@@ -487,6 +466,23 @@ class virtual_memory_manager {
         std::cerr << "Error parsing version size from file - " << ia.what() << std::endl;
         return (size_t) -1;
       }
+    }
+
+    size_t static version_block_size(std::string version_path){
+      std::string blocks_path_file_name = std::string(version_path) + "/_blocks_path";
+      std::ifstream blocks_path_file;
+      std::string blocks_dir_path;
+      
+      blocks_path_file.open(blocks_path_file_name);
+      if (!blocks_path_file.is_open()){
+        std::cerr << "Error opening blocks file path at: " << blocks_path_file_name << std::endl;
+        exit(-1);
+      }
+      if (!std::getline(blocks_path_file, blocks_dir_path)){
+        std::cerr << "Error reading blocks path file" << std::endl;
+        exit(-1);
+      } 
+      return block_storage::get_version_block_granularity(blocks_dir_path);
     }
 
     size_t current_region_capacity(){

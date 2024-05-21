@@ -51,13 +51,13 @@ public:
         base_dir_path = std::string(base_path);
         blocks_dir_path = std::string(base_path) + "/" + "blocks";
         stash_dir_path = std::string(base_path) + "/" + "stash";
-        return;
+        // return;
       }
-      if (!utility::create_directory(base_path)){
+      else if (!utility::create_directory(base_path)){
         std::cerr << "Privateer: Error creating base directory at: " << base_path << " - " << strerror(errno) << std::endl;
         exit(-1);
       }
-      
+      init_block_size();
     }
     
     if (action == OPEN && !utility::directory_exists(base_path)){
@@ -75,7 +75,6 @@ public:
     exit(-1);
     }
     if (action == CREATE){
-      // std::cout << "ACTION IS CREATE" << std::endl;
       if (utility::directory_exists(base_path)){
         std::cerr << "Privateer: Error creating datastore - base directory already exists, action must be PRIVATEER::OPEN" << std::endl;
         exit(-1);
@@ -91,7 +90,6 @@ public:
       } */
     }
     if (!utility::directory_exists(stash_base_path)){
-      // std::cout << "CREATING STASH DIR AT: " << stash_base_path << std::endl;
       if (!utility::create_directory(stash_base_path)){
         std::cerr << "Privateer: Error creating stash directory at: " << stash_base_path << " - " << strerror(errno) << std::endl;
         exit(-1);
@@ -110,9 +108,6 @@ public:
   }
 
   ~Privateer(){
-    // std::cout << "compression_calls: " << utility::compression_calls << std::endl;
-    // std::cout << "decompression_call: " << utility::decompression_calls << std::endl;
-    // std::cout << "ByeBye Privateer" << std::endl;
     struct sigaction sa;
     sa.sa_flags = SA_RESETHAND;
     sigemptyset(&sa.sa_mask);
@@ -127,7 +122,7 @@ public:
 
   void* create(void* addr, const char* version_metadata_path, size_t region_size, bool allow_overwrite){
     std::string version_metadata_full_path = base_dir_path + "/" + version_metadata_path;
-    vmm = new virtual_memory_manager(addr, region_size, version_metadata_full_path, blocks_dir_path, stash_dir_path, allow_overwrite);
+    vmm = new virtual_memory_manager(addr, region_size, m_block_size, version_metadata_full_path, blocks_dir_path, stash_dir_path, allow_overwrite);
     utility::sigsegv_handler_dispatcher::add_virtual_memory_manager((uint64_t) vmm->get_region_start_address(), region_size, vmm);
     struct sigaction sa;
     sa.sa_flags = SA_SIGINFO;
@@ -202,7 +197,8 @@ public:
   }
 
   size_t get_block_size(){
-    return vmm->get_block_size();
+    return m_block_size;      
+    // return vmm->get_block_size();
   }
 
   void* data(){
@@ -216,6 +212,7 @@ public:
 
   size_t region_size();
   static size_t version_capacity(std::string version_path);
+  static size_t version_block_size(std::string version_path);
   static const int CREATE = 0;
   static const int OPEN = 1;
 
@@ -226,21 +223,45 @@ private:
       std::cerr << "Error: Directory " << version_metadata_full_path << " does not exists" << std::endl;
       exit(-1);
     }
-    // std::cout << "HELLO FROM PRIVATEER OPEN 2" << std::endl;
     version_metadata_dir_path = version_metadata_full_path;
     vmm = new virtual_memory_manager(addr, version_metadata_dir_path, stash_dir_path, read_only);
-    // std::cout << "HELLO FROM PRIVATEER OPEN 3" << std::endl;
     utility::sigsegv_handler_dispatcher::add_virtual_memory_manager((uint64_t) vmm->get_region_start_address(), vmm->current_region_capacity(), vmm);
     struct sigaction sa;
     sa.sa_flags = SA_SIGINFO;
     sigemptyset(&sa.sa_mask);
     sa.sa_sigaction = utility::sigsegv_handler_dispatcher::handler;
-    // std::cout << "HELLO FROM PRIVATEER OPEN 3.5" << std::endl;
     if (sigaction(SIGSEGV, &sa, NULL) == -1){
       std::cerr << "Error: sigaction failed" << std::endl;
       exit(-1);
-    } // std::cout << "HELLO FROM PRIVATEER OPEN 4" << std::endl;
+    } 
     return vmm->get_region_start_address();
+  }
+
+  void init_block_size(){
+    if (m_block_size == 0){
+    // Set block_size
+      m_block_size = utility::get_environment_variable("PRIVATEER_BLOCK_SIZE");
+      if (std::isnan((double)m_block_size) || m_block_size == 0){
+        size_t num_blocks = utility::get_environment_variable("PRIVATEER_NUM_BLOCKS");
+        if (std::isnan((double) num_blocks) || num_blocks == 0){
+          m_block_size = FILE_GRANULARITY_DEFAULT_BYTES;
+        }
+        /* else{
+          if (region_max_capacity % num_blocks == 0){
+            m_block_size = region_max_capacity / num_blocks;
+          }
+          else{
+            std::cerr << "PRIVATEER_NUM_BLOCKS is set, but region capacity is not divisible by it "<< std::endl;
+            exit(-1);
+          }
+        } */
+      }
+      // Verify multiple of system's page size
+      /* if (m_block_size % pagesize != 0){
+        std::cerr << "Error: block_size must be multiple of system page size (" << pagesize << ")" << std::endl;
+        exit(-1);
+      } */
+    }
   }
 
   std::string EMPTY_BLOCK_HASH;
@@ -248,7 +269,9 @@ private:
   std::string blocks_dir_path;
   std::string stash_dir_path;
   std::string version_metadata_dir_path;
-  size_t file_granularity;
+  size_t m_block_size = 0L;
+  const size_t FILE_GRANULARITY_DEFAULT_BYTES = 2097152;
+  size_t pagesize = sysconf(_SC_PAGE_SIZE);
   virtual_memory_manager* vmm;
 };
 
@@ -258,4 +281,8 @@ inline size_t Privateer::region_size(){
 
 inline size_t Privateer::version_capacity(std::string version_path){
   return virtual_memory_manager::version_capacity(version_path);
+}
+
+inline size_t Privateer::version_block_size(std::string version_path){
+  return virtual_memory_manager::version_block_size(version_path);
 }

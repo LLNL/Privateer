@@ -271,6 +271,22 @@ class block_storage
       return true;
     }
 
+    static size_t get_version_block_granularity(std::string blocks_path){
+      std::string granularity_string;
+      std::string granularity_file_name = blocks_path + "/_granularity";
+      std::ifstream granularity_file;
+      granularity_file.open(granularity_file_name);
+      if (!granularity_file.is_open()){
+        std::cerr << "block_storage: Error opening block granularity metadata"<< std::endl;
+        exit(-1);
+      }
+      if (!std::getline(granularity_file, granularity_string)){
+        std::cerr << "block_storage: Error reading block granularity metadata"<< std::endl;
+        exit(-1);
+      }
+      return std::stol(granularity_string);
+    }
+
   private:
     void create(std::string base_directory_path, std::string stash_directory_path, size_t block_granularity_arg){
       // std::cout << "stash directory path at create() " << stash_directory_path << std::endl;
