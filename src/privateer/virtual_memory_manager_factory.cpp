@@ -1,6 +1,8 @@
 #include <privateer/virtual_memory_manager_factory.hpp>
 
 #ifdef SIGACTION
+SPDLOG_LOGGER_INFO(spdlog::default_logger(), "Using sigaction");
+
 #include <privateer/sigaction_virtual_memory_manager.hpp>
 #endif
 
