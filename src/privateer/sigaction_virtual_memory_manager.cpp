@@ -9,6 +9,10 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
+#ifdef USE_COMPRESSION
+#include <privateer/utility/compression.hpp>
+#endif
+
 namespace {
 template <typename Func>
 void run_parallel_for_count(size_t count, Func&& func) {
