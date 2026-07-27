@@ -7,6 +7,7 @@
 
 #include <stdlib.h>    // free
 #include "zstd.h"
+#include <sys/mman.h>
 
 
 /* #include <sstream>
