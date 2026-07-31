@@ -194,7 +194,7 @@ FetchContent_MakeAvailable(spdlog)
 include_directories(${spdlog_INCLUDE_DIRS})
 # target_link_libraries(privateer-static PUBLIC spdlog::spdlog)
 target_link_libraries(privateer PUBLIC spdlog::spdlog)
-target_compile_definitions(privateer PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_ERROR)
+target_compile_definitions(privateer PUBLIC SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO)
 # --------------------------------------------------
 
 # iostreams

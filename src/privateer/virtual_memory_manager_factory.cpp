@@ -28,6 +28,8 @@ virtual_memory_manager_base* virtual_memory_manager_factory::create(
 #elif defined(SIGACTION)
     SPDLOG_LOGGER_INFO(spdlog::default_logger(), 
         "virtual_memory_manager_factory: Creating SIGACTION virtual memory manager");
+    std::cout << "region max cap: " << region_max_capacity << std::endl;
+    std::cout << "block size: " << block_size << std::endl;
     return new sigaction_virtual_memory_manager(start_address, region_max_capacity, block_size,
                                                version_metadata_path, blocks_path, stash_path,
                                                allow_overwrite);

@@ -70,7 +70,7 @@ public:
       if (utility::directory_exists(base_path)){ // Do nothing, use existing
         /* SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Privateer: Error creating datastore - base directory already exists, action must be PRIVATEER::OPEN");
         exit(-1); */
-        spdlog::warn("Privateer: Using existing Privateer root dir at {}", base_path);
+        //spdlog::warn("Privateer: Using existing Privateer root dir at {}", base_path);
         base_dir_path = std::string(base_path);
         blocks_dir_path = std::string(base_path) + "/" + "blocks";
         stash_dir_path = std::string(base_path) + "/" + "stash";
