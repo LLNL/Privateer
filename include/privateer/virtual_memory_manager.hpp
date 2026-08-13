@@ -138,6 +138,7 @@ class virtual_memory_manager {
       
       // m_block_size = block_size;
       m_region_max_capacity = region_max_capacity;
+      std::cout << "region max capacity: " << m_region_max_capacity << std::endl;
       m_max_mem_size = max_mem_size_blocks * m_block_size;
       m_version_metadata_path = version_metadata_path;
 

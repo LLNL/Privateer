@@ -7,6 +7,7 @@
 
 #include <stdlib.h>    // free
 #include "zstd.h"
+#include <sys/mman.h>
 
 
 /* #include <sstream>
@@ -15,8 +16,8 @@
 #include <boost/iostreams/filter/zstd.hpp> */
 
 namespace utility{
-    std::atomic<size_t> compression_calls = 0;
-    std::atomic<size_t> decompression_calls = 0;
+    inline std::atomic<size_t> compression_calls = 0;
+    inline std::atomic<size_t> decompression_calls = 0;
     inline std::pair<void*,size_t> compress(void* input_buffer, size_t input_buffer_size){
         compression_calls++;
         // auto begin = std::chrono::high_resolution_clock::now();
