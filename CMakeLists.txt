@@ -57,6 +57,94 @@ endif()
 # --------------------------------------------------
 
 include(FetchContent)
+
+set(FETCHCONTENT_QUIET OFF)
+
+function(privateer_fetch_openssl)
+  message(STATUS "Download and setup OpenSSL")
+  FetchContent_Declare(openssl
+    URL https://github.com/openssl/openssl/releases/download/openssl-3.4.1/openssl-3.4.1.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_GetProperties(openssl)
+  if(NOT openssl_POPULATED)
+    FetchContent_Populate(openssl)
+  endif()
+
+  set(OPENSSL_ROOT_DIR ${openssl_SOURCE_DIR} CACHE PATH "Fetched OpenSSL root" FORCE)
+  set(OPENSSL_USE_STATIC_LIBS TRUE CACHE BOOL "Use static OpenSSL libs" FORCE)
+  find_package(OpenSSL REQUIRED)
+endfunction()
+
+function(privateer_fetch_zstd)
+  message(STATUS "Download and setup zstd")
+  set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+  set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+  set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
+  set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(zstd
+    URL https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz
+    SOURCE_SUBDIR build/cmake
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_MakeAvailable(zstd)
+
+  if(TARGET libzstd AND NOT TARGET zstd::zstd)
+    add_library(zstd::zstd ALIAS libzstd)
+  elseif(TARGET libzstd_static AND NOT TARGET zstd::zstd)
+    add_library(zstd::zstd ALIAS libzstd_static)
+  elseif(TARGET libzstd_shared AND NOT TARGET zstd::zstd)
+    add_library(zstd::zstd ALIAS libzstd_shared)
+  endif()
+
+  if(NOT TARGET zstd::zstd)
+    message(FATAL_ERROR "Fetched zstd but did not get a zstd::zstd-compatible target")
+  endif()
+endfunction()
+
+function(privateer_ensure_zstd_target)
+  if(TARGET zstd::zstd)
+    return()
+  endif()
+
+  if(ZSTD_LIBRARIES AND ZSTD_INCLUDE_DIRS)
+    add_library(zstd::zstd UNKNOWN IMPORTED)
+    set_target_properties(zstd::zstd
+      PROPERTIES
+        IMPORTED_LOCATION "${ZSTD_LIBRARIES}"
+        INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIRS}")
+    return()
+  endif()
+
+  privateer_fetch_zstd()
+endfunction()
+
+function(privateer_fetch_gtest)
+  message(STATUS "Download and setup GTest")
+  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+  set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_MakeAvailable(googletest)
+endfunction()
+
+function(privateer_fetch_boost)
+  message(STATUS "Download and setup Boost")
+  FetchContent_Declare(Boost
+    URL https://archives.boost.io/release/1.82.0/source/boost_1_82_0.tar.bz2
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  FetchContent_GetProperties(Boost)
+  if(NOT Boost_POPULATED)
+    FetchContent_Populate(Boost)
+  endif()
+
+  set(BOOST_ROOT ${boost_SOURCE_DIR} CACHE PATH "Fetched Boost root" FORCE)
+  set(CMAKE_FIND_PACKAGE_PREFER_CONFIG FALSE)
+  if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 OLD)
+  endif()
+  find_package(Boost 1.82 REQUIRED)
+endfunction()
+
 # ------------------ Boost -------------------------------------------------------------------------------
 set(Boost_NO_SYSTEM_PATHS OFF)
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
@@ -78,20 +166,7 @@ if (Boost_FOUND)
   endif()
   include_directories(${Boost_INCLUDE_DIRS})
 else ()
-  message(STATUS "Download and setup Boost")
-  FetchContent_Declare(Boost
-    URL https://archives.boost.io/release/1.82.0/source/boost_1_82_0.tar.bz2
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-  FetchContent_GetProperties(Boost)
-  if (NOT Boost_POPULATED)
-    FetchContent_Populate(Boost)
-  endif ()
-  set(BOOST_ROOT ${boost_SOURCE_DIR})
-  set(CMAKE_FIND_PACKAGE_PREFER_CONFIG FALSE)
-  if(POLICY CMP0167)
-    cmake_policy(SET CMP0167 OLD)
-  endif()
-  find_package(Boost 1.82 REQUIRED)
+  privateer_fetch_boost()
   include_directories(${Boost_INCLUDE_DIRS})
 endif ()
 
@@ -146,7 +221,10 @@ add_library(privateer STATIC ${privateer_src})
 
 target_link_libraries(privateer PUBLIC ${PRIVATEER_OPENMP_TARGET})
 
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL QUIET)
+if(NOT OpenSSL_FOUND)
+  privateer_fetch_openssl()
+endif()
 target_link_libraries(privateer PUBLIC rt)
 # target_link_libraries(privateer-static PUBLIC rt)
 target_link_libraries(privateer PUBLIC OpenSSL::SSL)
@@ -167,15 +245,18 @@ endif()
 
 # ZSTD
 # ------------------ZSTD----------------------------
-option(ENABLE_ZSTD "Enable compression" OFF)
-if (ENABLE_ZSTD)
+option(ENABLE_COMPRESSION "Enable compression" OFF)
+if (ENABLE_COMPRESSION)
   message(STATUS "Configuring with zstd")
   list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
-  find_package(zstd REQUIRED)
+  find_package(zstd QUIET)
+  privateer_ensure_zstd_target()
   # target_include_directories(privateer-static PUBLIC ${ZSTD_INCLUDE_DIRS})
   # target_link_libraries(privateer-static PUBLIC zstd::zstd)
   # target_compile_definitions(privateer-static PUBLIC USE_COMPRESSION)
-  target_include_directories(privateer PUBLIC ${ZSTD_INCLUDE_DIRS})
+  if(ZSTD_INCLUDE_DIRS)
+    target_include_directories(privateer PUBLIC ${ZSTD_INCLUDE_DIRS})
+  endif()
   target_link_libraries(privateer PUBLIC zstd::zstd)
   target_compile_definitions(privateer PUBLIC USE_COMPRESSION)
 endif()
@@ -237,6 +318,10 @@ find_package(MPI)
 
 option(ENABLE_PRIVATEER_TEST  "Enable Testing" ON)
 if (ENABLE_PRIVATEER_TEST)
+  find_package(GTest QUIET)
+  if(NOT GTest_FOUND)
+    privateer_fetch_gtest()
+  endif()
   include(CTest)
   enable_testing()
   add_subdirectory(test)
