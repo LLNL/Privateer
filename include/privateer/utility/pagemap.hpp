@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include <iostream>
+#include <spdlog/spdlog.h>
 
 namespace utility{
 
@@ -47,7 +48,7 @@ namespace utility{
   inline uint64_t * read_raw_pagemap(void* vaddr, size_t length){
     int pagemap_fd = open("/proc/self/pagemap", O_RDONLY);
     if (pagemap_fd == -1){
-      std::cout << "Error: Failed to open /proc/self/pagemap - " << std::endl;
+      SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Error: Failed to open /proc/self/pagemap");
       return nullptr;
     }
     
@@ -72,7 +73,7 @@ namespace utility{
     }
     int close_ret = close(pagemap_fd);
     if (close_ret == -1){
-      std::cerr << "Error: Failed to close /proc/self/pagemap - " << strerror(errno) << std::endl;
+      SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Error: Failed to close /proc/self/pagemap - {}", strerror(errno));
       return nullptr;
     }
     return data;

@@ -392,7 +392,7 @@ void sigaction_virtual_memory_manager::handler(int sig, siginfo_t* si, void* ctx
       //SPDLOG_LOGGER_INFO(spdlog::default_logger(), "virtual_memory_manager: handler() - Faulted on block address: {}", block_address - start_address);
       /*
       for(auto i : present_blocks) {
-        std::cout << "indices: " << (i - start_address) / m_block_size << std::endl;
+        SPDLOG_LOGGER_INFO(spdlog::default_logger(), "indices: {}", (i - start_address) / m_block_size);
       }
       */
       // std::cout << "thread: " << omp_get_thread_num() << " Faulted on block: " << (block_index % num_locks) << std::endl;

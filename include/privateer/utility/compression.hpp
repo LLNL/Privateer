@@ -4,6 +4,7 @@
 #include <string>
 #include <chrono>
 #include <atomic>
+#include <spdlog/spdlog.h>
 
 #include <stdlib.h>    // free
 #include "zstd.h"
@@ -25,7 +26,7 @@ namespace utility{
         void* const output_buffer = mmap(nullptr, output_buffer_size_bound, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); // malloc(output_buffer_size_bound);
         size_t output_size = ZSTD_compress(output_buffer, output_buffer_size_bound, input_buffer, input_buffer_size, 1);
         if (ZSTD_isError(output_size)){
-            std::cerr << "Compression Error: - " << ZSTD_getErrorName(output_size) << std::endl;
+              SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Compression Error: - {}", ZSTD_getErrorName(output_size));
             exit(-1);
         }
         /* auto end = std::chrono::high_resolution_clock::now();
@@ -39,12 +40,12 @@ namespace utility{
         // auto begin = std::chrono::high_resolution_clock::now();
         uint64_t rSize = ZSTD_getFrameContentSize(input_buffer, compressed_size);
         if (rSize == ZSTD_CONTENTSIZE_ERROR){
-            std::cerr << "Decompression Error: File was not compressed by ZSTD" << std::endl;
+              SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Decompression Error: File was not compressed by ZSTD");
             return -1;
         }
 
         if(rSize == ZSTD_CONTENTSIZE_UNKNOWN){
-            std::cerr << "Decompression Error: File unable to get content size" << std::endl;
+              SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Decompression Error: File unable to get content size");
             return -1;
         }
         

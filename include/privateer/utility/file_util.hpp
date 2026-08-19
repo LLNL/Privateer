@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <sys/stat.h>
+#include <spdlog/spdlog.h>
 
 namespace utility{
 
@@ -22,7 +23,7 @@ namespace utility{
         return true;
       }
       else{
-        std::cerr << "Privateer: Error creating directory: " << dir_path << " - " << ec.message() << std::endl;
+          SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Privateer: Error creating directory: {} - {}", dir_path, ec.message());
         return false;
       }
     }
@@ -47,7 +48,7 @@ namespace utility{
       fs::copy(source, destination, ec);
     }
     if (ec){
-      std::cerr << "Privateer: Error copying file: " << ec.message() << std::endl;
+      SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Privateer: Error copying file: {}", ec.message());
       return false;
     }
     return true;

@@ -257,7 +257,7 @@ namespace utility{
       // received_ts.push_back(std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count());
       // std::cout << "Page Fault Recieved At: " << std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count() << std::endl;
       // auto start = std::chrono::high_resolution_clock::now();
-      printf("CHECKING UFFD FROM %ld\n", (uint64_t) syscall(SYS_gettid)); // std::cout << "POLLING!!!" << std::endl;
+      SPDLOG_LOGGER_INFO(spdlog::default_logger(), "CHECKING UFFD FROM {}", (uint64_t) syscall(SYS_gettid));
       nread = read(m_uffd, &m_events[0], m_max_fault_events * sizeof(struct uffd_msg));
       if (nread == 0) {
         SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "UFFD: EOF on userfaultfd");
@@ -282,7 +282,7 @@ namespace utility{
       std::sort(&m_events[0], &m_events[msgs], less_than_key()); */
 
       // char* last_addr = nullptr;
-      printf("LOOPING MESSAGES FROM %ld\n", (uint64_t) syscall(SYS_gettid)); // std::cout << "POLLING!!!" << std::endl;
+      SPDLOG_LOGGER_INFO(spdlog::default_logger(), "LOOPING MESSAGES FROM {}", (uint64_t) syscall(SYS_gettid));
       for (int i = 0; i < msgs; ++i) {
         struct uffd_msg msg = m_events[i];
         if (msg.event != UFFD_EVENT_PAGEFAULT) {
