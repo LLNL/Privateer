@@ -643,8 +643,8 @@ void sigaction_virtual_memory_manager::update_metadata(int sub_region_index) {
 
 void sigaction_virtual_memory_manager::evict_if_needed() {
     void* to_evict;
-    std::cout << "current memory size: " << present_blocks.size() * m_block_size << std::endl;
-    std::cout << "max memory size: " << m_max_mem_size << std::endl;
+    // std::cout << "current memory size: " << present_blocks.size() * m_block_size << std::endl;
+    // std::cout << "max memory size: " << m_max_mem_size << std::endl;
     if ((present_blocks.size()*m_block_size) >= m_max_mem_size){
         SPDLOG_LOGGER_INFO(spdlog::default_logger(), "virtual_memory_manager: evict_if_needed() - Evicting");
         if (clean_lru.size() > 0){
