@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required (VERSION 3.5.1)
+cmake_minimum_required (VERSION 3.10)
 project( Privateer LANGUAGES CXX C )
 
 if(POLICY CMP0074)
@@ -129,24 +129,27 @@ endfunction()
 
 function(privateer_fetch_boost)
   message(STATUS "Download and setup Boost")
-  FetchContent_Declare(Boost
+  FetchContent_Declare(privateer_boost
     URL https://archives.boost.io/release/1.82.0/source/boost_1_82_0.tar.bz2
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-  FetchContent_GetProperties(Boost)
-  if(NOT Boost_POPULATED)
-    FetchContent_Populate(Boost)
+  FetchContent_GetProperties(privateer_boost)
+  if(NOT privateer_boost_POPULATED)
+    FetchContent_MakeAvailable(privateer_boost)
   endif()
 
-  set(BOOST_ROOT ${boost_SOURCE_DIR} CACHE PATH "Fetched Boost root" FORCE)
+  set(BOOST_ROOT ${privateer_boost_SOURCE_DIR} CACHE PATH "Fetched Boost root" FORCE)
+  set(_privateer_find_package_prefer_config ${CMAKE_FIND_PACKAGE_PREFER_CONFIG})
   set(CMAKE_FIND_PACKAGE_PREFER_CONFIG FALSE)
   if(POLICY CMP0167)
     cmake_policy(SET CMP0167 OLD)
   endif()
   find_package(Boost 1.82 REQUIRED)
+  set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ${_privateer_find_package_prefer_config})
 endfunction()
 
 # ------------------ Boost -------------------------------------------------------------------------------
 set(Boost_NO_SYSTEM_PATHS OFF)
+set(_privateer_find_package_prefer_config ${CMAKE_FIND_PACKAGE_PREFER_CONFIG})
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
 
 find_package(Boost CONFIG QUIET)
@@ -157,6 +160,7 @@ if(NOT Boost_FOUND)
   endif()
   find_package(Boost QUIET)
 endif()
+set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ${_privateer_find_package_prefer_config})
 
 if (Boost_FOUND)
 
