@@ -147,6 +147,30 @@ function(privateer_fetch_boost)
   set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ${_privateer_find_package_prefer_config})
 endfunction()
 
+function(privateer_apply_boost target_name)
+  if(TARGET Boost::headers)
+    target_link_libraries(${target_name} PUBLIC Boost::headers)
+    return()
+  endif()
+
+  if(TARGET Boost::boost)
+    target_link_libraries(${target_name} PUBLIC Boost::boost)
+    return()
+  endif()
+
+  if(Boost_INCLUDE_DIRS)
+    target_include_directories(${target_name} PUBLIC ${Boost_INCLUDE_DIRS})
+    return()
+  endif()
+
+  if(BOOST_ROOT AND EXISTS "${BOOST_ROOT}/boost")
+    target_include_directories(${target_name} PUBLIC ${BOOST_ROOT})
+    return()
+  endif()
+
+  message(FATAL_ERROR "Boost was found, but Privateer could not determine usable Boost headers.")
+endfunction()
+
 # ------------------ Boost -------------------------------------------------------------------------------
 set(Boost_NO_SYSTEM_PATHS OFF)
 set(_privateer_find_package_prefer_config ${CMAKE_FIND_PACKAGE_PREFER_CONFIG})
@@ -162,16 +186,8 @@ if(NOT Boost_FOUND)
 endif()
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ${_privateer_find_package_prefer_config})
 
-if (Boost_FOUND)
-
-  # Just a sanity check
-  if (NOT Boost_INCLUDE_DIRS)
-    message(FATAL_ERROR "Something is wrong: Boost_INCLUDE_DIRS is empty although Boost_FOUND is true.")
-  endif()
-  include_directories(${Boost_INCLUDE_DIRS})
-else ()
+if (NOT Boost_FOUND)
   privateer_fetch_boost()
-  include_directories(${Boost_INCLUDE_DIRS})
 endif ()
 
 # ---------------------------------------------------------------------------------------------------------- 
@@ -223,6 +239,7 @@ set(privateer_src ${privateer_base_src} ${privateer_impl_src} ${privateer_factor
 add_library(privateer STATIC ${privateer_src})
 # add_library(privateer-static STATIC ${privateer_src} )
 
+privateer_apply_boost(privateer)
 target_link_libraries(privateer PUBLIC ${PRIVATEER_OPENMP_TARGET})
 
 find_package(OpenSSL QUIET)
