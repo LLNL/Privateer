@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <limits>
+#include <spdlog/spdlog.h>
 
 namespace utility{
   inline size_t get_environment_variable(std::string variable_name){
@@ -39,7 +40,7 @@ namespace utility{
         if (file >> mem) {
           mem_avail_kb = mem;
         } else {
-          std::cerr << "SystemUtil: Error retreivng available memory" << std::endl;
+            SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "SystemUtil: Error retreivng available memory");
         }
       }
       // ignore rest of the line

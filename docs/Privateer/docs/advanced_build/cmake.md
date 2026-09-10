@@ -43,7 +43,7 @@ In addition to the standard CMake options, Metall have additional options as fol
     * Build a library for C interface
     * ON or OFF (default is OFF).
 
-* ENABLE_ZSTD
+* ENABLE_COMPRESSION
     * Build using zstd compression algorithm
     * ON or OFF (default is OFF).
 

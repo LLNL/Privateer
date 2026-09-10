@@ -42,7 +42,7 @@ jobs:
       - name: Build
         run: |
           mkdir build && cd build
-          cmake -DENABLE_ZSTD=ON -DCMAKE_INSTALL_PREFIX=. -DCMAKE_BUILD_TYPE=Debug ..
+          cmake -DENABLE_COMPRESSION=ON -DCMAKE_INSTALL_PREFIX=. -DCMAKE_BUILD_TYPE=Debug ..
           make install -j8
           ctest --output-on-failure
   build_uffd:
@@ -84,6 +84,6 @@ jobs:
       - name: Build
         run: |
           mkdir build && cd build
-          cmake -DENABLE_UFFD=ON -DENABLE_ZSTD=ON -DCMAKE_INSTALL_PREFIX=. -DCMAKE_BUILD_TYPE=Debug ..
+          cmake -DENABLE_UFFD=ON -DENABLE_COMPRESSION=ON -DCMAKE_INSTALL_PREFIX=. -DCMAKE_BUILD_TYPE=Debug ..
           make install -j8
           ctest --output-on-failure

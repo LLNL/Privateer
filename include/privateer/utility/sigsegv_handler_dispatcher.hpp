@@ -1,5 +1,6 @@
 #include <signal.h>
 #include <mutex>
+#include <spdlog/spdlog.h>
 
 #include "../virtual_memory_manager_base.hpp"
 
@@ -36,7 +37,7 @@ namespace utility{
           }
         }
         // printf("Address %ld not found for Thread ID: %ld\n", fault_address , (uint64_t) syscall(SYS_gettid));
-        std::cerr << "Fault address out of range\n";
+        SPDLOG_LOGGER_ERROR(spdlog::default_logger(), "Fault address out of range");
         exit(-1);
 
         // Call VMM->handler on appropriate vmm
